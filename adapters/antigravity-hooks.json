@@ -1,0 +1,10 @@
+{
+  "smon-record": {
+    "PreInvocation": [
+      { "hooks": [{ "type": "command", "command": "/Users/YOURNAME/dev/session-monitor/hooks/agy-event.sh", "timeout": 10 }] }
+    ],
+    "PostToolUse": [
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "/Users/YOURNAME/dev/session-monitor/hooks/agy-event.sh", "timeout": 10 }] }
+    ]
+  }
+}

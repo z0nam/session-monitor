@@ -1,0 +1,11 @@
+# smon-report 개인 설정 — 이 파일을 ~/.config/smon-report/config 로 복사해 채운다.
+#   cp report/config.example ~/.config/smon-report/config
+# run-report.sh 가 실행 시 source 한다. (SMON_REPORT_CONFIG 로 경로 override 가능)
+
+# 리포트를 받을 본인 Slack member ID (U로 시작). Slack 프로필 → "멤버 ID 복사".
+SLACK_SELF="U0XXXXXXXXX"
+
+# (선택) 헤드리스 실행용 Claude 전용 장기 토큰 파일 경로.
+#   `claude setup-token` 으로 발급한 토큰을 저장(chmod 600)하면, 대화형 로그인이
+#   풀려도 리포트는 독립적으로 돈다. 없으면 기존 OAuth 세션으로 폴백.
+# CLAUDE_TOKEN_FILE="$HOME/.config/smon-report/claude-token"

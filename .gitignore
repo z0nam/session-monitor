@@ -1,0 +1,12 @@
+# 런타임 DB·캐시
+sessions.db*
+__pycache__/
+
+# 런타임 로그
+report/logs/
+apply-color.log
+
+# 로컬 스크래치·무관 하위도구 (공개 레포에 미포함)
+.tmp/
+output/
+parsec-awake/

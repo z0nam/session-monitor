@@ -1,0 +1,383 @@
+#!/bin/bash
+# smon — Claude Code 세션 모니터 보드 (session-monitor Phase 1)
+# 사용: smon | smon all | smon find <검색어> | smon grep <검색어> | smon tail <sid> | smon prune | smon backfill
+set -euo pipefail
+DB="$HOME/dev/session-monitor/sessions.db"
+[ -f "$DB" ] || { echo "no db: $DB" >&2; exit 1; }
+
+Q() { sqlite3 -separator '|' -cmd '.timeout 500' "$DB" "$1"; }
+
+# 모니터링 대상 에이전트 실행파일 basename (추가/제거는 여기 + hooks/record-event.sh)
+AGENT_BINS="claude|codex|agy"
+
+MACHINE=$(hostname -s | tr '[:upper:]' '[:lower:]')
+
+# 4열: 경로→basename, 6열: 경과초→3m12s
+humanize() {
+  awk -F'|' -v OFS='|' '{
+    n = split($4, a, "/"); if (n > 0 && a[n] != "") $4 = a[n]
+    s = $6
+    if (s < 60)         $6 = s "s"
+    else if (s < 3600)  $6 = int(s/60) "m" (s%60) "s"
+    else if (s < 86400) $6 = int(s/3600) "h" int((s%3600)/60) "m"
+    else                $6 = int(s/86400) "d" int((s%86400)/3600) "h"
+    print
+  }'
+}
+
+# smon-tint v2.1: 밀린 색 적용 조정 — tab_want != tab_color 인 것을 실제 적용.
+# smon은 사용자 셸(세션 컨텍스트)에서 돌므로 cmux 소켓이 살아 있다.
+reconcile_colors() {
+  local lim=${1:-10} sid want ws
+  Q "SELECT session_id, COALESCE(tab_want,''), cmux_ws FROM sessions
+     WHERE cmux_ws IS NOT NULL AND cmux_ws != ''
+       AND COALESCE(tab_want,'') != COALESCE(tab_color,'')
+     LIMIT $lim;" | while IFS='|' read -r sid want ws; do
+    if "$HOME/dev/session-monitor/hooks/apply-color.sh" "$ws" "$want"; then
+      Q "UPDATE sessions SET tab_color='$want' WHERE session_id='$sid';" >/dev/null
+    fi
+  done
+}
+
+# pid가 살아있는 에이전트 프로세스인가 (PID 재사용 대비 실행파일 확인)
+is_agent_alive() {
+  local cmd base
+  cmd=$(ps -p "$1" -o command= 2>/dev/null) || return 1
+  base=${cmd%% *}; base=${base##*/}
+  printf '%s' "$base" | grep -qxE "$AGENT_BINS"
+}
+
+# pid 기록된 비-ENDED 세션 중 프로세스가 죽은 것만 ENDED로 강등.
+# 시간 기준 아님 — 살아있는 세션은 아무리 오래돼도 보드에 남는다.
+reap() {
+  local now sid pid color ws
+  now=$(date +%s)
+  while IFS='|' read -r sid pid; do
+    [ -n "$pid" ] || continue
+    is_agent_alive "$pid" && continue
+    # tab_want=''만 남기면 잔류 색은 reconcile이 청소 (크래시 안전망)
+    Q "UPDATE sessions SET state='ENDED', ended_at=$now, tab_want='' WHERE session_id='$sid';
+       INSERT INTO events (session_id, event_type, payload_json, created_at)
+         VALUES ('$sid', 'Reaped', '{\"reason\":\"process $pid dead\"}', $now);" >/dev/null
+  done < <(Q "SELECT session_id, pid FROM sessions WHERE state != 'ENDED' AND pid IS NOT NULL;")
+}
+
+board() {  # $1 = extra WHERE   (state 뒤 '?' = pid 미확인, PH: B=지침대기 G=완료)
+  {
+    echo 'STATE|AGENT|MACHINE|PROJECT|BRANCH|LAST|SESSION|PH|SUMMARY'
+    Q "SELECT st, ag, mc, pj, br, el, sid,
+              CASE ph0 WHEN 'done' THEN 'G' WHEN 'direction' THEN 'B' ELSE '-' END,
+              sm FROM (
+         SELECT state || CASE WHEN pid IS NULL AND state != 'ENDED' THEN '?' ELSE '' END AS st,
+                COALESCE(agent,'claude') AS ag, '$MACHINE' AS mc,
+                project_path AS pj, COALESCE(git_branch,'-') AS br,
+                CAST((strftime('%s','now') - last_event_at) AS INTEGER) AS el,
+                substr(session_id,1,8) AS sid,
+                substr(replace(COALESCE(summary,''),'|','/'),1,48) AS sm,
+                state AS s0, COALESCE(phase,'') AS ph0, last_event_at AS le
+         FROM sessions WHERE $1
+         UNION ALL
+         SELECT state, COALESCE(agent,'claude'), machine,
+                project_path, COALESCE(git_branch,'-'),
+                CAST((strftime('%s','now') - last_event_at) AS INTEGER),
+                substr(session_id,1,8),
+                substr(replace(COALESCE(summary,''),'|','/'),1,48),
+                state, COALESCE(phase,''), last_event_at
+         FROM remote_sessions WHERE $1)
+       ORDER BY CASE
+                WHEN s0 = 'NEEDS_ATTENTION' THEN 0
+                WHEN s0 = 'WAITING_INPUT' AND ph0 = 'direction' THEN 1
+                WHEN s0 = 'WAITING_INPUT' AND ph0 = 'done' THEN 2
+                WHEN s0 = 'RUNNING' THEN 3
+                WHEN s0 = 'WAITING_INPUT' THEN 4
+                ELSE 5 END, le DESC;" | humanize
+  } | column -t -s'|'
+}
+
+case "${1:-}" in
+  '')
+    reap
+    reconcile_colors 10
+    board "state != 'ENDED'"
+    ;;
+  all)
+    # 오늘 활동(로컬 자정 기준) 전체, ENDED 포함
+    reap
+    reconcile_colors 10
+    board "last_event_at >= strftime('%s', 'now', 'start of day', 'localtime')"
+    ;;
+  backfill)
+    # 훅에 pid 기록이 없던 시절의 세션 ↔ 지금 실행 중인 claude 프로세스 일회성 매칭.
+    # 1) 프로세스 env/인자에서 session_id 직접 검색 (ps eww) — 정확 매칭.
+    #    (cwd 매칭은 오판 사례 있음: 세션 논리 cwd ≠ 프로세스 cwd, 한글 NFD/NFC)
+    # 2) 못 찾았어도 세션 cwd에 claude 프로세스가 있으면 보류 (다음 훅 이벤트가 자동 백필)
+    # 3) 둘 다 아니면 죽은 세션 → ENDED
+    NOW=$(date +%s)
+    PIDS=$(ps -axo pid=,command= | awk -v b="$AGENT_BINS" \
+      '{c=$2; sub(/.*\//,"",c)} c ~ ("^(" b ")$") {print $1}')
+    [ -n "$PIDS" ] || { echo "no agent processes"; exit 0; }
+    ENVS=$(mktemp) CWDS=$(mktemp)
+    trap 'rm -f "$ENVS" "$CWDS"' EXIT
+    # ps eww는 pid를 하나씩만 — 여러 개 넘기면 macOS ps가 전체 프로세스를 덤프해
+    # 세션 env를 물려받은 자식(MCP 서버 등)이 오매칭된다
+    for p in $PIDS; do ps eww "$p" 2>/dev/null | tail -1; done > "$ENVS"
+
+    # 1차: env/인자에서 session_id 정확 매칭
+    Q "SELECT session_id FROM sessions WHERE pid IS NULL AND state != 'ENDED';" |
+    while read -r sid; do
+      pid=$(grep -F "$sid" "$ENVS" | awk '{print $1; exit}' || true)
+      [ -n "$pid" ] || continue
+      Q "UPDATE sessions SET pid=$pid WHERE session_id='$sid';" >/dev/null
+      echo "pid $pid -> ${sid:0:8} (env/args)"
+    done
+
+    # 2차: 아직 어느 세션에도 안 붙은 claude 프로세스의 cwd 목록
+    for p in $PIDS; do
+      [ "$(Q "SELECT count(*) FROM sessions WHERE pid=$p;")" = 0 ] || continue
+      # iconv: lsof의 한글 경로는 NFD(자소분리) — DB(NFC)와 비교하려면 정규화 필수
+      cwd=$(lsof -a -p "$p" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1 |
+            iconv -f UTF-8-MAC -t UTF-8 2>/dev/null)
+      echo "$p|$cwd"
+    done > "$CWDS"
+
+    # 3차: 남은 세션 — cwd에 주인 없는 claude가 있으면 보류, 아니면 죽은 것
+    Q "SELECT session_id, project_path FROM sessions
+       WHERE pid IS NULL AND state != 'ENDED';" |
+    while IFS='|' read -r sid path; do
+      if awk -F'|' -v c="$path" '$2==c{f=1} END{exit !f}' "$CWDS"; then
+        echo "보류 ${sid:0:8} ($path): cwd에 claude 있음 — 다음 훅 이벤트에서 자동 백필"
+      else
+        Q "UPDATE sessions SET state='ENDED', ended_at=$NOW WHERE session_id='$sid';
+           INSERT INTO events (session_id, event_type, payload_json, created_at)
+             VALUES ('$sid', 'Reaped', '{\"reason\":\"no matching claude process\"}', $NOW);" >/dev/null
+        echo "reaped ${sid:0:8} ($path)"
+      fi
+    done
+    ;;
+  tail)
+    PREFIX="${2:?usage: smon tail <session_id prefix>}"
+    {
+      echo 'TIME|EVENT|DETAIL'
+      Q "SELECT datetime(created_at,'unixepoch','localtime'),
+                event_type,
+                substr(COALESCE(json_extract(payload_json,'\$.notification_type'),'')
+                       || ' ' || COALESCE(json_extract(payload_json,'\$.message'),
+                                          json_extract(payload_json,'\$.end_reason'),
+                                          json_extract(payload_json,'\$.source'), ''), 1, 60)
+         FROM events
+         WHERE session_id LIKE '$PREFIX%'
+         ORDER BY id;"
+    } | column -t -s'|'
+    ;;
+  prune)
+    CUTOFF="strftime('%s','now','-7 days')"
+    N=$(Q "SELECT count(*) FROM sessions WHERE state='ENDED' AND last_event_at < $CUTOFF;")
+    Q "DELETE FROM events WHERE session_id IN
+         (SELECT session_id FROM sessions WHERE state='ENDED' AND last_event_at < $CUTOFF);
+       DELETE FROM sessions WHERE state='ENDED' AND last_event_at < $CUTOFF;" >/dev/null
+    echo "pruned $N ended session(s) older than 7 days"
+    ;;
+  export)
+    # 이 머신의 활성 세션 스냅샷을 JSON으로 stdout에 (허브의 smon pull이 ssh로 호출).
+    # 죽은 세션이 전파되지 않도록 먼저 reap.
+    reap
+    OUT=$(sqlite3 -json -cmd '.timeout 500' "$DB" \
+      "SELECT session_id, agent, project_path, git_branch, state,
+              last_event_at, pid, summary, cmux_ws, COALESCE(phase,'') AS phase
+       FROM sessions WHERE state != 'ENDED';")
+    printf '%s\n' "${OUT:-[]}"   # 0건이면 sqlite가 빈 출력 → 빈 배열로
+    ;;
+  pull)
+    # config remote_hosts(맥/유닉스)·remote_hosts_win(윈도우)의 각 머신에서
+    # export를 끌어와 remote_sessions 교체
+    HOSTS=$(Q "SELECT value FROM config WHERE key='remote_hosts';")
+    HOSTS_WIN=$(Q "SELECT value FROM config WHERE key='remote_hosts_win';")
+    [ -n "$HOSTS$HOSTS_WIN" ] || { echo "config remote_hosts(_win) 비어 있음"; exit 1; }
+    NOW=$(date +%s)
+    # 원격 export 시도 — 인자: host, 그 뒤 순서대로 시도할 원격 명령들
+    fetch() {
+      local h=$1 tmp=$2 cmd; shift 2
+      for cmd in "$@"; do
+        if ssh -o BatchMode=yes -o ConnectTimeout=5 "$h" "$cmd" > "$tmp" 2>/dev/null \
+           && [ -s "$tmp" ] && /usr/bin/jq -e 'type=="array"' "$tmp" >/dev/null 2>&1; then
+          return 0
+        fi
+      done
+      return 1
+    }
+    WIN_CMD_CMD='python "%USERPROFILE%\dev\session-monitor\winspoke\record_event.py" export'
+    WIN_CMD_PS1='python "$env:USERPROFILE\dev\session-monitor\winspoke\record_event.py" export'
+    for h in $HOSTS $HOSTS_WIN; do
+      TMP=$(mktemp)
+      case " $HOSTS_WIN " in
+        *" $h "*) FETCH_OK=$(fetch "$h" "$TMP" "$WIN_CMD_CMD" "$WIN_CMD_PS1" && echo y) ;;
+        *)        FETCH_OK=$(fetch "$h" "$TMP" '"$HOME/dev/session-monitor/bin/smon" export' && echo y) ;;
+      esac
+      if [ "$FETCH_OK" = y ]; then
+        Q "BEGIN;
+           DELETE FROM remote_sessions WHERE machine='$h';
+           INSERT INTO remote_sessions (machine, session_id, agent, project_path,
+                                        git_branch, state, last_event_at, pid,
+                                        summary, cmux_ws, pulled_at, phase)
+             SELECT '$h',
+                    json_extract(value,'\$.session_id'), json_extract(value,'\$.agent'),
+                    json_extract(value,'\$.project_path'), json_extract(value,'\$.git_branch'),
+                    json_extract(value,'\$.state'), json_extract(value,'\$.last_event_at'),
+                    json_extract(value,'\$.pid'), json_extract(value,'\$.summary'),
+                    json_extract(value,'\$.cmux_ws'), $NOW,
+                    COALESCE(json_extract(value,'\$.phase'),'')
+             FROM json_each(readfile('$TMP'));
+           COMMIT;" >/dev/null
+        echo "$h: $(Q "SELECT count(*) FROM remote_sessions WHERE machine='$h';") sessions"
+      else
+        echo "$h: 도달 실패 — 이전 스냅샷 유지"
+      fi
+      rm -f "$TMP"
+    done
+    ;;
+  done|dir)
+    # 명시적 완료/일단락 사인 — LLM 분류보다 우선. 인자 없으면 pid 조상으로 자기 세션 특정
+    # (세션 안의 에이전트/사용자가 직접 호출 가능: "이 건은 완료" = smon done)
+    PH=$([ "$1" = done ] && echo done || echo direction)
+    if [ -n "${2:-}" ]; then
+      SIDS=$(Q "SELECT session_id FROM sessions WHERE session_id LIKE '$2%' AND state != 'ENDED';")
+    else
+      # 자기 세션 특정 4단계: ① pid 조상 추적 (claude 등 비샌드박스)
+      P=$PPID SIDS=
+      for _ in 1 2 3 4 5 6 7 8; do
+        [ -n "$P" ] && [ "$P" -gt 1 ] || break
+        CMD=$(ps -p "$P" -o command= 2>/dev/null) || break
+        BASE=${CMD%% *}; BASE=${BASE##*/}
+        if printf '%s' "$BASE" | grep -qxE "$AGENT_BINS"; then
+          SIDS=$(Q "SELECT session_id FROM sessions WHERE pid=$P AND state != 'ENDED';")
+          break
+        fi
+        P=$(ps -p "$P" -o ppid= 2>/dev/null | tr -d ' ')
+      done
+      # ② Claude env ③ agy env (codex 샌드박스는 ps가 막혀 ①이 불가)
+      [ -z "$SIDS" ] && [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && \
+        SIDS=$(Q "SELECT session_id FROM sessions
+                  WHERE session_id='$CLAUDE_CODE_SESSION_ID' AND state != 'ENDED';")
+      [ -z "$SIDS" ] && [ -n "${ANTIGRAVITY_CONVERSATION_ID:-}" ] && \
+        SIDS=$(Q "SELECT session_id FROM sessions
+                  WHERE session_id='$ANTIGRAVITY_CONVERSATION_ID' AND state != 'ENDED';")
+      # ④ cwd 매칭 (codex 폴백): 같은 폴더의 가장 최근 활성 세션
+      if [ -z "$SIDS" ]; then
+        PWD_SQL=$(printf '%s' "$PWD" | sed "s/'/''/g")
+        SIDS=$(Q "SELECT session_id FROM sessions
+                  WHERE state != 'ENDED' AND project_path='$PWD_SQL'
+                  ORDER BY last_event_at DESC LIMIT 1;")
+      fi
+    fi
+    [ -n "$SIDS" ] || { echo "세션 특정 실패 — smon $1 <sid앞자리> 로 지정하세요" >&2; exit 1; }
+    for sid in $SIDS; do
+      Q "UPDATE sessions SET phase='$PH',
+           tab_want = CASE
+             WHEN cmux_ws IS NULL OR cmux_ws = '' THEN COALESCE(tab_want,'')
+             WHEN state='NEEDS_ATTENTION' THEN 'Red'
+             WHEN state='WAITING_INPUT' AND '$PH'='done' THEN 'Green'
+             WHEN state='WAITING_INPUT' THEN 'Blue'
+             ELSE '' END
+         WHERE session_id='$sid';" >/dev/null
+      echo "phase=$PH ${sid:0:8}"
+    done
+    reconcile_colors 5
+    ;;
+  repaint)
+    # cmux 재시작/업그레이드로 실제 색이 다 날아갔을 때: 전부 미지('?') 처리 후 강제 재적용
+    Q "UPDATE sessions SET tab_color='?' WHERE state != 'ENDED'
+       AND cmux_ws IS NOT NULL AND cmux_ws != '';" >/dev/null
+    reconcile_colors 100
+    echo "repainted"
+    ;;
+  ack)
+    # 초록(완료) 확인하고 끄기: phase=acked + 색 clear
+    PREFIX="${2:?usage: smon ack <session_id prefix>}"
+    while IFS='|' read -r sid; do
+      Q "UPDATE sessions SET phase='acked', tab_want='' WHERE session_id='$sid';" >/dev/null
+      echo "acked ${sid:0:8}"
+    done < <(Q "SELECT session_id FROM sessions WHERE session_id LIKE '$PREFIX%';")
+    reconcile_colors 5
+    ;;
+  find)
+    # 전 머신 세션에서 검색어 찾기 (요약·프로젝트·세션ID, 대소문자 무시)
+    TERM_RAW="${2:?usage: smon find <검색어>}"
+    T=$(printf '%s' "$TERM_RAW" | sed "s/'/''/g")
+    {
+      echo 'STATE|AGENT|MACHINE|PROJECT|BRANCH|LAST|SESSION|SUMMARY'
+      Q "SELECT st, ag, mc, pj, br, el, sid, sm FROM (
+           SELECT state AS st, COALESCE(agent,'claude') AS ag, '$MACHINE' AS mc,
+                  project_path AS pj, COALESCE(git_branch,'-') AS br,
+                  CAST((strftime('%s','now') - last_event_at) AS INTEGER) AS el,
+                  substr(session_id,1,8) AS sid,
+                  substr(replace(COALESCE(summary,''),'|','/'),1,48) AS sm,
+                  last_event_at AS le, session_id AS fid, summary AS fsm
+           FROM sessions
+           UNION ALL
+           SELECT state, COALESCE(agent,'claude'), machine, project_path,
+                  COALESCE(git_branch,'-'),
+                  CAST((strftime('%s','now') - last_event_at) AS INTEGER),
+                  substr(session_id,1,8),
+                  substr(replace(COALESCE(summary,''),'|','/'),1,48),
+                  last_event_at, session_id, summary
+           FROM remote_sessions)
+         WHERE lower(COALESCE(fsm,'') || ' ' || COALESCE(pj,'') || ' ' || fid)
+               LIKE lower('%$T%')
+         ORDER BY le DESC LIMIT 30;" | humanize
+    } | column -t -s'|'
+    ;;
+  report)
+    # 아침 리포트용 재료: 완료(phase=done) + 빈 요약(노이즈) 제외, 프로젝트별 그룹.
+    # 사람이 봐도 되지만 1차 소비자는 헤드리스 claude(run-report.sh)가 이걸 서술로 정리.
+    reap >/dev/null 2>&1 || true
+    NOWD=$(date '+%Y-%m-%d (%a) %H:%M')
+    Q "SELECT st, ag, mc, el, sid, sm, pj FROM (
+         SELECT state AS st, COALESCE(agent,'claude') AS ag, '$MACHINE' AS mc,
+                CAST((strftime('%s','now') - last_event_at) AS INTEGER) AS el,
+                substr(session_id,1,8) AS sid,
+                replace(replace(COALESCE(summary,''),'|','/'),char(10),' ') AS sm,
+                project_path AS pj, last_event_at AS le
+         FROM sessions
+         WHERE state != 'ENDED' AND COALESCE(phase,'') != 'done'
+           AND trim(COALESCE(summary,'')) != ''
+         UNION ALL
+         SELECT state, COALESCE(agent,'claude'), machine,
+                CAST((strftime('%s','now') - last_event_at) AS INTEGER),
+                substr(session_id,1,8),
+                replace(replace(COALESCE(summary,''),'|','/'),char(10),' '),
+                project_path, last_event_at
+         FROM remote_sessions
+         WHERE state != 'ENDED' AND COALESCE(phase,'') != 'done'
+           AND trim(COALESCE(summary,'')) != '')
+       ORDER BY pj, le DESC;" | awk -F'|' -v hdr="$NOWD" '
+      function human(s){ if(s<60)return s"s"; if(s<3600)return int(s/60)"m"; if(s<86400)return int(s/3600)"h"; return int(s/86400)"d" }
+      BEGIN{ proj=""; n=0 }
+      { base=$7; k=split($7,a,"/"); if(k>0 && a[k]!="") base=a[k]
+        if(base!=proj){ proj=base; printf "\n## %s\n", (base==""?"(무명)":base) }
+        n++
+        printf "  %-14s %s@%s  %s  %s — %s\n", $1, $2, $3, human($4), $5, $6 }
+      END{ printf "\n(활성 세션 %d개 · 완료/빈요약 제외)\n", n }' \
+      | { echo "# smon report — $NOWD · $MACHINE"; cat; }
+    ;;
+  model)
+    # 요약 모델 조회/교체 (탐색용 — 이 모델 저 모델 바꿔가며 비교)
+    if [ -n "${2:-}" ]; then
+      Q "INSERT OR REPLACE INTO config VALUES ('model','$2');"
+      echo "model = $2"
+    else
+      Q "SELECT value FROM config WHERE key='model';"
+    fi
+    ;;
+  work)
+    # 요약 워커 1패스 (launchd가 주기 실행하는 것과 동일)
+    exec python3 "$HOME/dev/session-monitor/worker/summarize.py"
+    ;;
+  grep)
+    # 세션 전사 전문검색 (find=요약만 vs grep=대화 원문). 로컬 전사만 대상.
+    shift
+    exec python3 "$HOME/dev/session-monitor/worker/grep_transcripts.py" "$@"
+    ;;
+  *)
+    echo "usage: smon [all | find <검색어> | grep <검색어> | report | tail <sid> | done [sid] | dir [sid] | ack <sid> | prune | backfill | model [이름] | work | export | pull]" >&2; exit 1
+    ;;
+esac

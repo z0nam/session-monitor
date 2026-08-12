@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "/Users/YOURNAME/dev/session-monitor/hooks/codex-event.sh", "timeout": 10 }] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "/Users/YOURNAME/dev/session-monitor/hooks/codex-event.sh", "timeout": 10 }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "/Users/YOURNAME/dev/session-monitor/hooks/codex-event.sh", "timeout": 10 }] }
+    ],
+    "PermissionRequest": [
+      { "hooks": [{ "type": "command", "command": "/Users/YOURNAME/dev/session-monitor/hooks/codex-event.sh", "timeout": 10 }] }
+    ]
+  }
+}
