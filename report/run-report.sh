@@ -58,14 +58,15 @@ $MATERIAL
 # 실행 지시
 
 - 오늘: $(date '+%Y-%m-%d (%a) %H:%M') KST. 무인 실행 — 사람이 보지 않는다.
-- 재료가 비었거나 활성 프로젝트가 사실상 없으면 DM 없이 \`REPORT_SKIPPED: 활성 프로젝트 없음\` 한 줄로 종료.
-- 아니면 위 형식대로 리포트를 만들어 Slack 본인 DM(user \`$SLACK_SELF\`)으로 **반드시 발송**한 뒤 종료.
-- 질문·확인 게이트 없이 진행. 읽기 전용(smon 조회 + Slack DM 1건 외 금지).
-- 마지막에 \`REPORT_SENT\` / \`REPORT_SKIPPED: <사유>\` / \`REPORT_FAILED: <사유>\` 중 정확히 하나.
+- 재료가 비었거나 활성 프로젝트가 사실상 없으면 아무 것도 안 만들고 \`REPORT_SKIPPED: 활성 프로젝트 없음\` 한 줄로 종료.
+- 아니면 위 형식대로 **Slack Canvas(체크리스트)를 생성**하고(title \`smon 리포트 · $(date '+%Y-%m-%d (%a)')\`),
+  그 캔버스 링크를 본인 DM(user \`$SLACK_SELF\`)으로 **핑**한 뒤 종료.
+- 질문·확인 게이트 없이 진행. 읽기 전용(smon 조회 + 캔버스 생성 + 핑 DM 외 금지).
+- 마지막에 \`REPORT_SENT\` / \`REPORT_SKIPPED: <사유>\` / \`REPORT_FAILED: <사유>\` 중 정확히 하나 + 성공 시 \`CANVAS_URL=<url>\`.
 EOF
 )
 
-ALLOWED='Bash(smon:*),Bash(date:*),mcp__plugin_slack_slack__slack_send_message'
+ALLOWED='Bash(smon:*),Bash(date:*),mcp__plugin_slack_slack__slack_create_canvas,mcp__plugin_slack_slack__slack_send_message'
 
 # perl alarm = macOS에 timeout(1)이 없어서 쓰는 대체
 OUT=$(perl -e 'alarm shift; exec @ARGV' "$TIMEOUT" \
