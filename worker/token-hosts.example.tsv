@@ -1,0 +1,7 @@
+# token_usage.py 호스트 목록 — 실사본은 ~/.config/smon/token-hosts.tsv 에 두고 이 파일은 예시만.
+# host<TAB>pycmd   (pycmd=local → 이 기계에서 직접 / 원격은 ssh 실행 파이썬명: mac=python3, Windows=python)
+# 오프라인 기계는 자동으로 건너뛴다. 호스트명은 각자 ssh 로 닿는 이름(~/.ssh/config, Tailscale MagicDNS 등).
+this-machine	local
+some-mac	python3
+some-windows-box	python
+some-linux-box	python3

@@ -1,0 +1,18 @@
+# token_usage.py 분류 규칙 — 실사본은 ~/.config/smon/token-rules.tsv 에 두고 이 파일은 예시만.
+# host_glob<TAB>kind<TAB>pattern<TAB>category<TAB>subcategory[<TAB>note]
+#   kind: host(호스트전체) | cwd(경로 부분일치) | slug(슬러그 부분일치) | mixed_root(홈·dev 루트)
+#   위에서부터 첫 매치가 이긴다. 아무것도 안 맞으면 기본 = 업무(work).
+#   category 는 자유 문자열이지만 요약 테이블은 '개인' vs '업무' 축으로 집계한다.
+
+# 특정 회사 기계 전체를 업무로:
+work-laptop	host		업무	work-machine	회사기계 전량 업무
+
+# 개인 프로젝트(경로 일부로 매칭). 실제 폴더 조각을 넣어 쓴다:
+*	cwd	my-research-folder	개인	연구A
+*	cwd	@gmail.com	개인	개인드라이브	개인 Gmail 드라이브
+
+# 홈/dev 루트(여러 프로젝트가 섞인 세션)를 한 버킷으로. 소량의 업무가 섞일 수 있음(폴더단위로는 분리 불가):
+home-machine	host		개인	잡무	개인기계 홈=잡무
+*	mixed_root		개인	잡무	홈/ dev 루트 혼합
+
+# 그 외 전부 = 업무 (규칙 불필요, 기본값)

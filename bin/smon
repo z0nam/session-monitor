@@ -377,7 +377,15 @@ case "${1:-}" in
     shift
     exec python3 "$HOME/dev/session-monitor/worker/grep_transcripts.py" "$@"
     ;;
+  tokens)
+    # 여러 기계 토큰 사용량 집계 → 개인/업무 요약 + 무손실 CSV.
+    # 호스트·분류 규칙은 ~/.config/smon/token-{hosts,rules}.tsv (worker/*.example.tsv 참고).
+    #   smon tokens              # 요약 + 오늘자 CSV(~/.local/share/smon/)
+    #   smon tokens --csv PATH    # CSV 경로 지정
+    shift
+    exec python3 "$HOME/dev/session-monitor/worker/token_usage.py" "$@"
+    ;;
   *)
-    echo "usage: smon [all | find <검색어> | grep <검색어> | report | tail <sid> | done [sid] | dir [sid] | ack <sid> | prune | backfill | model [이름] | work | export | pull]" >&2; exit 1
+    echo "usage: smon [all | find <검색어> | grep <검색어> | tokens [--csv PATH] | report | tail <sid> | done [sid] | dir [sid] | ack <sid> | prune | backfill | model [이름] | work | export | pull]" >&2; exit 1
     ;;
 esac
