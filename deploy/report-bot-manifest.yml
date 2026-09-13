@@ -1,0 +1,32 @@
+# smon-report 배포용 봇 — 리포트 발송에 필요한 최소 권한만.
+#
+# 왜 따로 만드나: 원내 배포는 봇 토큰 하나를 여러 사람 맥에 복사하는 구조다.
+# 개인 자동화용 봇(일정관리봇 등, im:history 같은 넓은 권한 보유)을 그대로 뿌리면
+# 그 권한이 같이 퍼진다. 새어도 피해가 "리포트 발송" 범위를 넘지 않게 분리한다.
+#
+# 만드는 법: https://api.slack.com/apps → Create New App → From an app manifest
+#            → 이 파일 붙여넣기 → Install to Workspace
+# 설치 후: OAuth & Permissions 의 "Bot User OAuth Token"(xoxb-…)을 배포 대상에게 전달.
+#          각자 ~/.config/smon-report/slack-bot-token 에 저장(chmod 600).
+#
+# 권한 근거:
+#   chat:write     — 캔버스 링크를 수신자 DM 으로 1건. 봇은 이 scope 만으로 유저 DM 가능(실측).
+#   canvases:write — 캔버스 생성 + canvases.access.set(수신자에게 권한 부여).
+#                    access.set 이 없으면 수신자에게 not_visible 이라 링크만 가고 안 열린다.
+display_information:
+  name: smon-report
+  description: 아침 smon 리포트 — 캔버스 생성 후 본인 DM 으로 링크 발송
+  background_color: "#2c2d30"
+features:
+  bot_user:
+    display_name: smon리포트
+    always_online: false
+oauth_config:
+  scopes:
+    bot:
+      - chat:write
+      - canvases:write
+settings:
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

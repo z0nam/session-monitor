@@ -30,14 +30,25 @@ cp report/config.example ~/.config/smon-report/config
 
 **2. Slack 토큰**
 
+관리자에게 **배포용 봇 토큰(xoxb)** 을 받아 저장한다.
+
 ```sh
-# 봇 토큰(xoxb) 저장 — 관리자에게 받는다
-install -m 600 /dev/null ~/.config/smon-report/slack-bot-token
+mkdir -p ~/.config/smon-report
 pbpaste > ~/.config/smon-report/slack-bot-token   # 또는 편집기로 붙여넣기
+chmod 600 ~/.config/smon-report/slack-bot-token
 ```
 
-worklog(calendar-worklog)를 이미 쓰고 있으면 `~/.config/calendar-worklog/slack-bot-token`을
-자동으로 찾으므로 이 단계를 건너뛰어도 된다.
+> **관리자용**: 배포 봇은 `deploy/report-bot-manifest.yml` 로 새로 만든다(권한 2개:
+> `chat:write`, `canvases:write`). 개인 자동화용 봇을 그대로 뿌리면 그 넓은 권한이 함께
+> 퍼지고, 회수하려면 토큰을 갈아 전원이 다시 받아야 한다.
+
+토큰은 이 순서로 찾는다 — 먼저 잡히는 것을 쓴다.
+
+```
+$SLACK_BOT_TOKEN → $SLACK_BOT_TOKEN_FILE
+→ ~/.config/smon-report/slack-bot-token        ← 배포 대상은 여기
+→ ~/.config/calendar-worklog/slack-bot-token   ← worklog 브리핑을 함께 쓰는 머신의 편의 폴백
+```
 
 **3. 등록**
 
