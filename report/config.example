@@ -22,3 +22,10 @@ SLACK_SELF="U0XXXXXXXXX"
 #   필요 scope: chat:write, canvases:write (+ im:write, canvases:read 권장)
 # SLACK_TOKEN_ENV_FILE="$HOME/dev/ji-slack-admin/slack-directory/.env"
 # SLACK_TOKEN_VAR="SLACK_USER_TOKEN"
+
+# (선택) 리포트를 보낼 담당 머신의 hostname -s. 여러 머신에 잡을 켰을 때 중복 DM 방지.
+#   지정하면 그 머신에서만 돌고, 나머지는 "담당 아님"으로 조용히 빠진다.
+# REPORT_HOST="studio"
+
+# (선택) 오늘 것이 이미 갔는지 Slack 검색으로 확인(기본 1). 사용자 토큰(search:read)일 때만 동작.
+# REPORT_DEDUP=1

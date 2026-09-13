@@ -12,7 +12,11 @@ TIMEOUT=420          # 7분. 브리핑보다 가볍다(외부 fetch 없음). 넘
 # 개인 설정은 레포에 안 박고 config에서 읽는다. report/config.example 참고.
 #   기본 경로: ~/.config/smon-report/config  (SMON_REPORT_CONFIG 로 override)
 CONFIG="${SMON_REPORT_CONFIG:-$HOME/.config/smon-report/config}"
+# set -a: config 값들을 export 한다. post-report.py 는 자식 프로세스라 export 없이는
+# REPORT_SENDER 같은 값을 못 본다(2026-09-13: 이걸 빠뜨려 user 설정인데 봇으로 나갔다).
+set -a
 [ -r "$CONFIG" ] && . "$CONFIG"
+set +a
 SLACK_SELF="${SLACK_SELF:-}"   # 본인 Slack member ID (U…). config에서 지정.
 
 # launchd 최소 env 보정 — smon(~/.local/bin)·claude(~/.local/bin)·sqlite 경로 확보.
@@ -36,6 +40,27 @@ fi
 cd "$REPO" || { echo "FATAL: repo 없음 $REPO"; exit 1; }
 [ -r report/prompt.md ] || { echo "FATAL: report/prompt.md 없음"; exit 1; }
 [ -n "$SLACK_SELF" ] || { echo "REPORT_FAILED: SLACK_SELF 미설정 — $CONFIG 에 지정 (report/config.example 참고)"; echo "=== 종료(설정없음) ==="; exit 1; }
+
+# 중복 발송 가드 1 — 담당 머신. 여러 머신에 리포트 잡을 켜면 같은 DM 이 여러 통 온다.
+#   config 를 머신 간에 복사해도 이 값이 따라오므로, 담당이 아닌 머신은 스스로 빠진다.
+THIS_HOST=$(hostname -s)
+if [ -n "${REPORT_HOST:-}" ] && [ "$REPORT_HOST" != "$THIS_HOST" ]; then
+  echo "REPORT_SKIPPED: 이 머신($THIS_HOST)은 리포트 담당이 아니다 (REPORT_HOST=$REPORT_HOST)"
+  echo "=== $(date '+%F %T') 종료(담당 아님) ==="
+  exit 0
+fi
+
+# 중복 발송 가드 2 — 오늘 것이 이미 갔는지 Slack 에 물어본다(머신 간 유일한 공유 상태).
+#   claude 를 돌리기 전에 확인해 헛돈을 안 쓴다. exit 2 = 이미 발송됨.
+if [ "${REPORT_DEDUP:-1}" = "1" ]; then
+  PRE=$(SLACK_SELF="$SLACK_SELF" "$REPO/report/post-report.py" --precheck 2>&1); PRE_RC=$?
+  echo "--- precheck: $PRE (rc=$PRE_RC) ---"
+  if [ "$PRE_RC" -eq 2 ]; then
+    echo "REPORT_SKIPPED: 오늘 리포트가 이미 발송됨"
+    echo "=== $(date '+%F %T') 종료(중복 방지) ==="
+    exit 0
+  fi
+fi
 
 # 재료 수집: 완료/노이즈 제외된 프로젝트별 활성 세션.
 MATERIAL=$(smon report 2>&1)

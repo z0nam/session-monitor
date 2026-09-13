@@ -31,10 +31,12 @@
 stdout: CANVAS_ID=… / CANVAS_URL=… / REPORT_DM_TS=…
 종료코드: 0 성공 / 1 실패. 러너가 이 코드로 판정하므로 거짓 성공을 내지 않는다.
 """
+import datetime
 import json
 import os
 import re
 import sys
+import urllib.parse
 import urllib.request
 
 DEFAULT_ENV_FILE = "~/dev/ji-slack-admin/slack-directory/.env"
@@ -110,6 +112,17 @@ def api(token, method, payload):
         return json.loads(r.read())
 
 
+def api_get(token, method, params):
+    """search.* 는 GET + form 파라미터를 쓴다."""
+    qs = urllib.parse.urlencode(params)
+    req = urllib.request.Request(
+        f"https://slack.com/api/{method}?{qs}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read())
+
+
 def main():
     args = sys.argv[1:]
     def opt(name, default=None):
@@ -120,15 +133,18 @@ def main():
             return v
         return default
 
+    precheck = "--precheck" in args
+    if precheck:
+        args.remove("--precheck")
     title = opt("--title")
     target = opt("--to") or os.environ.get("SLACK_SELF", "").strip()
-    if not title:
+    if not title and not precheck:
         sys.exit("post-report: --title 없음")
     if not target:
         sys.exit("post-report: 대상 없음 (--to 또는 SLACK_SELF)")
 
-    body = sys.stdin.read().strip()
-    if not body:
+    body = "" if precheck else sys.stdin.read().strip()
+    if not body and not precheck:
         sys.exit("post-report: 캔버스 본문이 비어 있음 (stdin)")
 
     kind, token = pick_sender()
@@ -150,6 +166,29 @@ def main():
                      f"({who.get('user')}) != 대상 {target}. 발송하지 않음.")
     elif not who.get("bot_id"):
         sys.exit(f"post-report: 봇 토큰이 아님 — {who.get('user')}({who.get('user_id')})")
+
+    if precheck:
+        # 오늘 것이 이미 갔는지 = Slack 이 유일한 머신 간 공유 상태다.
+        # (사용자 토큰의 search:read 로만 가능. 봇 토큰은 검색 권한이 없어 통과시킨다.)
+        if kind != "user":
+            print("PRECHECK=skip-unsupported(bot)")
+            return
+        today = datetime.datetime.now().strftime("%Y-%m-%d")
+        q = f'"오늘 smon 리포트" from:<@{target}> on:{today}'
+        try:
+            r = api_get(token, "search.messages", {"query": q, "count": "5"})
+        except Exception as e:
+            print(f"PRECHECK=unknown({e})")
+            return
+        if not r.get("ok"):
+            print(f"PRECHECK=unknown({r.get('error')})")
+            return
+        n = r.get("messages", {}).get("total", 0)
+        if n:
+            print(f"PRECHECK=already-sent({n})")
+            sys.exit(2)
+        print("PRECHECK=clear")
+        return
 
     try:
         c = api(token, "canvases.create", {
