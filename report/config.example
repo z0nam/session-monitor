@@ -9,3 +9,9 @@ SLACK_SELF="U0XXXXXXXXX"
 #   `claude setup-token` 으로 발급한 토큰을 저장(chmod 600)하면, 대화형 로그인이
 #   풀려도 리포트는 독립적으로 돈다. 없으면 기존 OAuth 세션으로 폴백.
 # CLAUDE_TOKEN_FILE="$HOME/.config/smon-report/claude-token"
+
+# (선택) 발송용 Slack 사용자 토큰(xoxp)의 위치. 기본값은 아래와 같다.
+#   발신자가 토큰 주인으로 고정되므로, 본인 계정 토큰이어야 본인 DM 에 본인 이름으로 들어간다.
+#   필요 scope: chat:write, canvases:write (+ im:write, canvases:read 권장)
+# SLACK_TOKEN_ENV_FILE="$HOME/dev/ji-slack-admin/slack-directory/.env"
+# SLACK_TOKEN_VAR="SLACK_USER_TOKEN"
