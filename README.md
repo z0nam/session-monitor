@@ -44,8 +44,25 @@ sessions.db             # 데이터 (gitignore)
 훅은 `~/.claude/settings.json`(user level)에 이벤트별로 등록되어 있다.
 새로 뜨는 세션부터 적용 (이미 떠 있는 세션엔 소급 안 됨).
 
-아침 리포트(매일 07:50, Slack Canvas + DM)는 `report/` — 설치는 **[report/README.md](report/README.md)**,
+아침 리포트(매일 07:50, Slack Canvas + DM)는 `report/` — 설정은 **[report/README.md](report/README.md)**,
 등록은 `./install.sh --with-report`.
+
+### 범위 — 개인 도구다
+
+session-monitor 는 **내 머신들에서 도는 AI 세션을 관측하는 개인 도구**다. 전사 배포 대상이 아니다.
+리포트는 그 머신에 훅이 깔려 있고 CLI 에이전트를 실제로 써야 내용이 생기므로, 채팅 위주 사용자에겐
+빈 리포트가 간다.
+
+worklog(`calendar-worklog`)와 헷갈리기 쉬운데 경계는 이렇다.
+
+| | session-monitor | calendar-worklog |
+|---|---|---|
+| 무엇 | 세션 **관측** — 훅·DB·`smon` CLI·`smon report` | 캘린더 업무기록과 **아침 브리핑** |
+| 소스 | 로컬 에이전트 세션만 | 캘린더·monday·Slack·메일·GW·smon |
+| 대상 | 나(그리고 CLI 를 쓰는 소수) | 원내 구성원 |
+
+브리핑은 이미 `smon export` 로 세션 정보를 읽는다(`briefing/prompt.md` C-6). 아침 메시지를
+한 통으로 합칠지는 열린 문제이고, 합친다면 **발표는 worklog, 재료는 smon** 이 경계다.
 
 ## 훅 ↔ 상태 매핑
 
