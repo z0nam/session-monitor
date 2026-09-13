@@ -44,6 +44,9 @@ sessions.db             # 데이터 (gitignore)
 훅은 `~/.claude/settings.json`(user level)에 이벤트별로 등록되어 있다.
 새로 뜨는 세션부터 적용 (이미 떠 있는 세션엔 소급 안 됨).
 
+아침 리포트(매일 07:50, Slack Canvas + DM)는 `report/` — 설치는 **[report/README.md](report/README.md)**,
+등록은 `./install.sh --with-report`.
+
 ## 훅 ↔ 상태 매핑
 
 | Hook 이벤트 | state 전이 | 비고 |

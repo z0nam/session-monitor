@@ -7,7 +7,7 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/YOURNAME/dev/session-monitor/report/run-report.sh</string>
+    <string>__REPO__/report/run-report.sh</string>
   </array>
 
   <!-- 매일 07:50. 아침 브리핑(08:00) 직전에 프로젝트 상태부터. 트라이얼 후 브리핑과 병합 고려. -->
@@ -19,7 +19,7 @@
 
   <!-- 러너가 자체 로그(report/logs/)를 쓰므로 여기선 부팅 실패만 잡는다. -->
   <key>StandardErrorPath</key>
-  <string>/Users/YOURNAME/dev/session-monitor/report/logs/launchd.err</string>
+  <string>__REPO__/report/logs/launchd.err</string>
 
   <key>RunAtLoad</key>
   <false/>
