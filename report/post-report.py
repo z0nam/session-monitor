@@ -14,9 +14,19 @@
 이라 **발신자가 토큰 주인으로 고정**된다. 보내기 전에 auth.test 로 신분을 확인하고 대상과 다르면
 아무 것도 만들지 않고 실패로 끝낸다 — 조용히 남에게 배달되는 경로를 없앤다.
 
-토큰: 1) $SLACK_USER_TOKEN  2) $SLACK_TOKEN_ENV_FILE 의 $SLACK_TOKEN_VAR
-      (기본 ~/dev/ji-slack-admin/slack-directory/.env 의 SLACK_USER_TOKEN, namun-admin-cli 앱)
-필요 scope: chat:write, canvases:write (+ im:write, canvases:read 권장)
+발신 경로 두 가지 ($REPORT_SENDER = auto|bot|user, 기본 auto = 봇이 있으면 봇)
+  bot  : 봇 토큰(xoxb)으로 캔버스 생성 → 수신자에게 access.set → 링크 DM.
+         발신자는 봇 이름. **원내 배포 기본** — 앱을 각자 만들 필요가 없다.
+         봇이 만든 캔버스는 기본적으로 수신자에게 not_visible 이라 access.set 이 필수다(실측).
+  user : 사용자 토큰(xoxp)으로 캔버스 생성 + DM. 발신자가 본인 이름으로 찍힌다.
+         봇 계정이 없는 환경의 대비책이자, 본인 이름을 원할 때의 선택지.
+
+토큰 찾는 순서
+  봇   1) $SLACK_BOT_TOKEN  2) $SLACK_BOT_TOKEN_FILE
+       3) ~/.config/smon-report/slack-bot-token  4) ~/.config/calendar-worklog/slack-bot-token
+  사용자 1) $SLACK_USER_TOKEN  2) $SLACK_TOKEN_ENV_FILE 의 $SLACK_TOKEN_VAR
+       (기본 ~/dev/ji-slack-admin/slack-directory/.env 의 SLACK_USER_TOKEN, namun-admin-cli 앱)
+필요 scope: 둘 다 chat:write, canvases:write (사용자 토큰은 + im:write, canvases:read 권장)
 
 stdout: CANVAS_ID=… / CANVAS_URL=… / REPORT_DM_TS=…
 종료코드: 0 성공 / 1 실패. 러너가 이 코드로 판정하므로 거짓 성공을 내지 않는다.
@@ -30,7 +40,20 @@ import urllib.request
 DEFAULT_ENV_FILE = "~/dev/ji-slack-admin/slack-directory/.env"
 
 
-def read_token():
+BOT_TOKEN_FILES = ["~/.config/smon-report/slack-bot-token",
+                   "~/.config/calendar-worklog/slack-bot-token"]
+
+
+def _from_file(path):
+    path = os.path.expanduser(path)
+    if os.path.exists(path):
+        v = open(path, encoding="utf-8").read().strip()
+        if v:
+            return v
+    return None
+
+
+def read_user_token():
     t = os.environ.get("SLACK_USER_TOKEN")
     if t:
         return t.strip()
@@ -42,6 +65,38 @@ def read_token():
             if m:
                 return m.group(1).strip().strip("'\"")
     return None
+
+
+def read_bot_token():
+    t = os.environ.get("SLACK_BOT_TOKEN")
+    if t:
+        return t.strip()
+    f = os.environ.get("SLACK_BOT_TOKEN_FILE")
+    if f:
+        return _from_file(f)
+    for path in BOT_TOKEN_FILES:
+        v = _from_file(path)
+        if v:
+            return v
+    return None
+
+
+def pick_sender():
+    """(종류, 토큰) 결정. 기본 auto = 봇이 있으면 봇, 없으면 사용자 토큰."""
+    mode = (os.environ.get("REPORT_SENDER") or "auto").strip().lower()
+    if mode not in ("auto", "bot", "user"):
+        sys.exit(f"post-report: REPORT_SENDER 값 오류 — {mode!r} (auto|bot|user)")
+    if mode == "bot":
+        t = read_bot_token()
+        return ("bot", t) if t else (None, None)
+    if mode == "user":
+        t = read_user_token()
+        return ("user", t) if t else (None, None)
+    t = read_bot_token()
+    if t:
+        return "bot", t
+    t = read_user_token()
+    return ("user", t) if t else (None, None)
 
 
 def api(token, method, payload):
@@ -76,21 +131,25 @@ def main():
     if not body:
         sys.exit("post-report: 캔버스 본문이 비어 있음 (stdin)")
 
-    token = read_token()
+    kind, token = pick_sender()
     if not token:
-        sys.exit("post-report: Slack 사용자 토큰 없음 "
-                 f"($SLACK_USER_TOKEN 또는 {DEFAULT_ENV_FILE})")
+        sys.exit("post-report: Slack 토큰 없음 — 봇 토큰(~/.config/smon-report/slack-bot-token 등) "
+                 f"또는 사용자 토큰($SLACK_USER_TOKEN, {DEFAULT_ENV_FILE})")
+    print(f"SENDER={kind}")
 
-    # 신분 확인 — 토큰 주인이 곧 발신자다. 대상(본인)과 다르면 남의 DM 으로 갈 수 있으므로 중단.
     try:
         who = api(token, "auth.test", {})
     except Exception as e:
         sys.exit(f"post-report: auth.test 실패 — {e}")
     if not who.get("ok"):
         sys.exit(f"post-report: 토큰 인증 실패 — {who.get('error')}")
-    if who.get("user_id") != target:
-        sys.exit(f"post-report: 신분 불일치 — 토큰 주인 {who.get('user_id')}"
-                 f"({who.get('user')}) != 대상 {target}. 발송하지 않음.")
+    if kind == "user":
+        # 사용자 토큰은 토큰 주인이 곧 발신자다. 대상(본인)과 다르면 남의 DM 으로 갈 수 있으므로 중단.
+        if who.get("user_id") != target:
+            sys.exit(f"post-report: 신분 불일치 — 토큰 주인 {who.get('user_id')}"
+                     f"({who.get('user')}) != 대상 {target}. 발송하지 않음.")
+    elif not who.get("bot_id"):
+        sys.exit(f"post-report: 봇 토큰이 아님 — {who.get('user')}({who.get('user_id')})")
 
     try:
         c = api(token, "canvases.create", {
@@ -105,6 +164,16 @@ def main():
     url = f"{who.get('url', '').rstrip('/')}/docs/{who.get('team_id')}/{cid}"
     print(f"CANVAS_ID={cid}")
     print(f"CANVAS_URL={url}")
+
+    if kind == "bot":
+        # 봇이 만든 캔버스는 수신자에게 not_visible 이다 — 권한을 줘야 열린다.
+        try:
+            a = api(token, "canvases.access.set",
+                    {"canvas_id": cid, "access_level": "write", "user_ids": [target]})
+        except Exception as e:
+            sys.exit(f"post-report: canvases.access.set 호출 실패 — {e} (캔버스 {cid} 는 생성됨)")
+        if not a.get("ok"):
+            sys.exit(f"post-report: 캔버스 공유 거부 — {a.get('error')} (캔버스 {cid} 는 생성됨)")
 
     try:
         m = api(token, "chat.postMessage",

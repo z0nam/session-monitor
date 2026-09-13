@@ -10,7 +10,14 @@ SLACK_SELF="U0XXXXXXXXX"
 #   풀려도 리포트는 독립적으로 돈다. 없으면 기존 OAuth 세션으로 폴백.
 # CLAUDE_TOKEN_FILE="$HOME/.config/smon-report/claude-token"
 
-# (선택) 발송용 Slack 사용자 토큰(xoxp)의 위치. 기본값은 아래와 같다.
+# (선택) 발신 경로. auto(기본) = 봇 토큰이 있으면 봇, 없으면 사용자 토큰.
+#   bot  — 봇 이름으로 도착. 원내 배포 기본값(각자 Slack 앱을 만들 필요가 없다).
+#          토큰: $SLACK_BOT_TOKEN / $SLACK_BOT_TOKEN_FILE /
+#                ~/.config/smon-report/slack-bot-token / ~/.config/calendar-worklog/slack-bot-token
+#   user — 본인 이름으로 도착. 봇 계정이 없는 환경의 대비책이자 본인 이름을 원할 때.
+# REPORT_SENDER="auto"
+
+# (선택) 사용자 토큰(xoxp) 경로 — REPORT_SENDER=user 일 때. 기본값은 아래와 같다.
 #   발신자가 토큰 주인으로 고정되므로, 본인 계정 토큰이어야 본인 DM 에 본인 이름으로 들어간다.
 #   필요 scope: chat:write, canvases:write (+ im:write, canvases:read 권장)
 # SLACK_TOKEN_ENV_FILE="$HOME/dev/ji-slack-admin/slack-directory/.env"
