@@ -85,9 +85,12 @@ INSERT INTO sessions (session_id, agent, project_path, git_branch, source, cmux_
   ON CONFLICT(session_id) DO UPDATE SET
     last_event_at=$NOW,
     $( [ -n "$WS" ] && echo "cmux_ws='$(sq "$WS")'," )
-    -- SessionStart(새 프로세스/resume)는 pid 갱신, 그 외 이벤트는 비어 있을 때만 백필
-    pid=$( [ "$EVENT" = SessionStart ] && echo "$PID_SQL" || echo "COALESCE(pid, $PID_SQL)" )
+    -- SessionStart(새 프로세스/resume)는 pid 갱신, 그 외 이벤트는 비어 있을 때만 백필.
+    -- 단 어댑터가 pid를 직접 준 경우(SMON_AGENT_PID, Hermes)는 항상 갱신: Hermes resume(-c/--resume)은
+    -- on_session_start 를 다시 쏘지 않아, 옛(죽은) pid 가 남으면 reap 이 산 세션을 ENDED 로 강등한다(실측).
+    pid=$( { [ "$EVENT" = SessionStart ] || [ -n "${SMON_AGENT_PID:-}" ]; } && echo "$PID_SQL" || echo "COALESCE(pid, $PID_SQL)" )
     $( [ -n "$STATE" ] && echo ", state='$STATE'" )
+    $( [ -n "$STATE" ] && [ "$STATE" != ENDED ] && echo ", ended_at=NULL" )
     $ENDED_SQL
     $( [ "$EVENT" = SessionStart ] && echo ", project_path='$(sq "$CWD")', started_at=$NOW, ended_at=NULL" )
     $( [ -n "$BRANCH" ] && echo ", git_branch='$(sq "$BRANCH")'" )
