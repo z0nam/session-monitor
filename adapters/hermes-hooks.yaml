@@ -1,0 +1,6 @@
+# Hermes Agent 셸 훅 — smon 어댑터 (SSOT). config.yaml 은 사용자 설정이 섞인 YAML 이라 심링크/덮어쓰기
+# 대신 install.sh 가 아래 한 줄(YAML flow)을 `hermes config set hooks '<...>'` 로 적용한다 (hooks 키만 교체).
+# 승인(consent): (event, command) 쌍마다 1회 — install.sh 가 ~/.hermes/shell-hooks-allowlist.json 에 기록.
+#   스크립트 내용 수정은 재승인 불필요(명령 문자열 기준).
+# 이벤트 매핑은 hooks/agent-event.sh 의 hermes:* case 참조.
+{on_session_start: [{command: __REPO__/hooks/hermes-event.sh, timeout: 10}], pre_llm_call: [{command: __REPO__/hooks/hermes-event.sh, timeout: 10}], on_session_end: [{command: __REPO__/hooks/hermes-event.sh, timeout: 10}], on_session_finalize: [{command: __REPO__/hooks/hermes-event.sh, timeout: 10}], pre_approval_request: [{command: __REPO__/hooks/hermes-event.sh, timeout: 10}], post_approval_response: [{command: __REPO__/hooks/hermes-event.sh, timeout: 10}]}

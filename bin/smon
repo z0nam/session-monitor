@@ -44,7 +44,10 @@ is_agent_alive() {
   local cmd base
   cmd=$(ps -p "$1" -o command= 2>/dev/null) || return 1
   base=${cmd%% *}; base=${base##*/}
-  printf '%s' "$base" | grep -qxE "$AGENT_BINS"
+  printf '%s' "$base" | grep -qxE "$AGENT_BINS" && return 0
+  # Hermes: 본체가 ~/.hermes/tools/python-*/bin/python3 (basename 매칭 불가) — 경로로 판정
+  case "$cmd" in */.hermes/*python3*) return 0 ;; esac
+  return 1
 }
 
 # pid 기록된 비-ENDED 세션 중 프로세스가 죽은 것만 ENDED로 강등.
@@ -254,13 +257,18 @@ case "${1:-}" in
         fi
         P=$(ps -p "$P" -o ppid= 2>/dev/null | tr -d ' ')
       done
-      # ② Claude env ③ agy env (codex 샌드박스는 ps가 막혀 ①이 불가)
+      # ② Claude env ③ agy env ③' Hermes env (codex 샌드박스는 ps가 막혀 ①이 불가)
       [ -z "$SIDS" ] && [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && \
         SIDS=$(Q "SELECT session_id FROM sessions
                   WHERE session_id='$CLAUDE_CODE_SESSION_ID' AND state != 'ENDED';")
       [ -z "$SIDS" ] && [ -n "${ANTIGRAVITY_CONVERSATION_ID:-}" ] && \
         SIDS=$(Q "SELECT session_id FROM sessions
                   WHERE session_id='$ANTIGRAVITY_CONVERSATION_ID' AND state != 'ENDED';")
+      [ -z "$SIDS" ] && [ -n "${HERMES_SESSION_ID:-}" ] && {
+        # hooks/hermes-event.sh 가 YYYYMMDD_HHMMSS_hex → hex-YYYYMMDD_HHMMSS 로 뒤집어 저장한다
+        H_SID="${HERMES_SESSION_ID##*_}-${HERMES_SESSION_ID%_*}"
+        SIDS=$(Q "SELECT session_id FROM sessions
+                  WHERE session_id='$H_SID' AND state != 'ENDED';"); }
       # ④ cwd 매칭 (codex 폴백): 같은 폴더의 가장 최근 활성 세션
       if [ -z "$SIDS" ]; then
         PWD_SQL=$(printf '%s' "$PWD" | sed "s/'/''/g")

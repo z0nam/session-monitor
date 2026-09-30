@@ -50,8 +50,30 @@ def _entry_role_text(entry):
     return role, text.strip()
 
 
+def hermes_excerpt(sid):
+    """Hermes 는 JSONL 전사가 없다 — ~/.hermes/state.db 에서 user/assistant 꼬리를 읽는다.
+    압축으로 세션 id 가 회전해도 hermes-event.sh 가 새 id 로 기록하므로 sid 하나만 보면 된다."""
+    hstate = os.path.join(os.environ.get("HERMES_HOME") or os.path.expanduser("~/.hermes"), "state.db")
+    try:
+        con = sqlite3.connect(f"file:{hstate}?mode=ro", uri=True, timeout=2)
+        rows = con.execute(
+            "SELECT role, content FROM messages WHERE session_id=? AND role IN ('user','assistant') "
+            "AND content IS NOT NULL AND content != '' ORDER BY id DESC LIMIT 40", (sid,)).fetchall()
+        con.close()
+    except sqlite3.Error:
+        return None
+    parts = [f"[{r}] {c.strip()[:800]}" for r, c in reversed(rows)
+             if c.strip() and not c.lstrip().startswith("[System note")]
+    if not parts:
+        return None
+    text = "\n".join(parts)
+    return text[-EXCERPT_CHARS:]
+
+
 def transcript_excerpt(path):
     """transcript JSONL 꼬리에서 user/assistant 텍스트만 추출."""
+    if path.startswith("hermes-state:"):
+        return hermes_excerpt(path[len("hermes-state:"):])
     try:
         with open(path, "rb") as f:
             f.seek(0, 2)

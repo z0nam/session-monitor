@@ -28,7 +28,9 @@ AGENT_BINS="claude|codex|agy"
 
   # 에이전트 프로세스 PID: 조상 중 실행파일 basename이 AGENT_BINS인 첫 프로세스(최대 6단계).
   # 주의: 부분문자열 매칭 금지 — 래퍼 셸 커맨드에 .claude/ 같은 경로가 들어와 오탐한다.
-  PID= P=$PPID
+  # 어댑터가 pid를 직접 넘기면 그대로 쓴다 (Hermes: 본체가 python3라 basename 매칭 불가)
+  PID=${SMON_AGENT_PID:-} P=$PPID
+  [ -n "$PID" ] && P=
   for _ in 1 2 3 4 5 6; do
     [ -n "$P" ] && [ "$P" -gt 1 ] || break
     CMD=$(ps -p "$P" -o command= 2>/dev/null) || break

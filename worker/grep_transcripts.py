@@ -8,6 +8,7 @@
 대상 전사 (이 머신 로컬만 — 원격 머신 전사는 여기 없음):
   - Claude Code : ~/.claude/projects/<slug>/<uuid>.jsonl
   - Codex       : ~/.codex/sessions/YYYY/MM/DD/rollout-*-<uuid>.jsonl
+  - Hermes      : ~/.hermes/state.db (messages 테이블, 읽기전용 LIKE)
 
 찾은 uuid를 sessions.db와 조인해 상태·에이전트·프로젝트·경과·요약을 붙인다.
 검색어는 고정 문자열(grep -F)·대소문자 무시로 취급한다.
@@ -138,6 +139,43 @@ def load_db(uuids):
     return info
 
 
+def hermes_matches(term):
+    """Hermes 대화는 JSONL 이 아니라 ~/.hermes/state.db — 읽기전용 LIKE 검색 (대소문자무시, 고정문자열).
+    위임 자식(parent 가 compression 아닌 세션)은 제외 — 보드와 같은 기준. → {sid: (hits, first_text, last_ts)}"""
+    hstate = os.path.join(os.environ.get("HERMES_HOME") or os.path.join(HOME, ".hermes"), "state.db")
+    if not os.path.exists(hstate):
+        return {}
+    pat = "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    try:
+        con = sqlite3.connect(f"file:{hstate}?mode=ro", uri=True, timeout=2.0)
+        rows = con.execute(
+            """SELECT m.session_id, COUNT(*), MIN(m.content), MAX(m.timestamp)
+               FROM messages m JOIN sessions s ON s.id = m.session_id
+               LEFT JOIN sessions p ON p.id = s.parent_session_id
+               WHERE m.role IN ('user','assistant') AND m.content LIKE ? ESCAPE '\\'
+                 AND (s.parent_session_id IS NULL OR p.end_reason = 'compression')
+               GROUP BY m.session_id""", (pat,)).fetchall()
+        con.close()
+    except sqlite3.Error:
+        return {}
+    return {sid: (n, txt or "", ts) for sid, n, txt, ts in rows}
+
+
+def hermes_smon_id(sid):
+    """hooks/hermes-event.sh 와 같은 변환: YYYYMMDD_HHMMSS_hex → hex-YYYYMMDD_HHMMSS (보드 SESSION 열 구분용)."""
+    parts = sid.rsplit("_", 1)
+    return f"{parts[1]}-{parts[0]}" if len(parts) == 2 and "_" in parts[0] else sid
+
+
+def snippet_of(text, term, width=64):
+    text = re.sub(r"\s+", " ", text).strip()
+    i = text.lower().find(term.lower())
+    if i < 0:
+        return text[:width]
+    start = max(0, i - width // 3)
+    return ("…" if start > 0 else "") + text[start:start + width]
+
+
 def main():
     args = [a for a in sys.argv[1:] if a]
     limit = 25
@@ -168,6 +206,10 @@ def main():
                 "uuid": uuid, "agent": agent, "path": path, "hits": hits,
                 "mtime": os.path.getmtime(path),
             }
+    for sid, (hits, text, ts) in hermes_matches(term).items():
+        sid = hermes_smon_id(sid)
+        rows[sid] = {"uuid": sid, "agent": "hermes", "path": "", "hits": hits,
+                     "mtime": ts or 0, "snippet": snippet_of(text, term)}
 
     if not rows:
         print(f"(전사에서 '{term}' 못 찾음)", file=sys.stderr)
@@ -183,14 +225,14 @@ def main():
             elapsed = now - last_at if last_at else None
             agent = agent or r["agent"]
         else:
-            state, proj, summary = "-", os.path.dirname(r["path"]), ""
+            state, proj, summary = "-", os.path.dirname(r["path"]) or "-", ""
             elapsed = now - r["mtime"]
             agent = r["agent"]
         proj = os.path.basename(proj.rstrip("/")) or proj
         out.append({
             "state": state, "agent": agent, "proj": proj[:26],
             "elapsed": elapsed, "uuid": uuid, "hits": r["hits"],
-            "snippet": first_snippet(r["path"], term),
+            "snippet": r.get("snippet") or first_snippet(r["path"], term),
         })
 
     out.sort(key=lambda x: (x["elapsed"] is None, x["elapsed"] or 0))

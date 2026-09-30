@@ -1,13 +1,13 @@
 ---
 name: smon
 description: >
-  이 맥에서 돌아가는 모든 AI 코딩 에이전트 세션(Claude Code·Codex·Antigravity)의
+  이 맥에서 돌아가는 모든 AI 코딩 에이전트 세션(Claude Code·Codex·Antigravity·Hermes)의
   상태 보드 CLI. 사용자가 "나 뭐 하고 있었지 / 뭐 하다 말았지", "떠 있는 세션 뭐 있지",
   "방치된/입력 기다리는 세션", "세션 현황·요약" 류를 물으면 셸 명령 `smon`(PATH)을
   실행해 보드를 읽고 답한다. 각 세션에 로컬 LLM 한 줄 요약이 붙어 있다.
 ---
 
-# smon — AI 에이전트 세션 모니터 (Claude Code · Codex · Antigravity)
+# smon — AI 에이전트 세션 모니터 (Claude Code · Codex · Antigravity · Hermes)
 
 어느 폴더·어느 에이전트에서든 PATH의 셸 명령 `smon`으로 실행한다.
 데이터는 훅이 SQLite(`~/dev/session-monitor/sessions.db`)에 결정론적으로 쌓은 것
@@ -40,7 +40,9 @@ smon prune            # 7일 지난 ENDED 정리
   안 잡히면 `smon grep <키워드>`로 **전사 원문**을 뒤진다. 논의됐지만 요약에 안 남은
   주제(파일명·경로·고유명사 등)는 grep이라야 걸린다. grep은 이 머신 로컬 전사만 본다.
 - RUNNING = 턴 진행 중, WAITING_INPUT = 턴 끝나고 대기, ENDED = 종료.
-- AGENT 열 = 어느 에이전트의 세션인지 (claude / codex / antigravity).
+- AGENT 열 = 어느 에이전트의 세션인지 (claude / codex / antigravity / hermes).
+  hermes 세션 id는 `hex-YYYYMMDD_HHMMSS`로 뒤집혀 저장된다 (Hermes 원 id `YYYYMMDD_HHMMSS_hex`).
+  `hermes --resume`에는 원 id를 써야 한다.
 - LAST = 마지막 이벤트 경과시간. 오래됐어도 프로세스가 살아 있으면 죽은 게 아니라
   "밀린 세션"이다 (죽은 세션은 보드가 자동으로 걷어냄).
 - state 뒤 `?` = 소유 프로세스 미확정(생존 판정 불가). 거슬리면 `smon backfill`.

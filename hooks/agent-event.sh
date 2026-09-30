@@ -19,6 +19,14 @@ case "$AGENT:$NATIVE" in
   antigravity:PostToolUse)    CANON=UserPromptSubmit ;;
   antigravity:PostInvocation) CANON=Stop ;;        # 향후 버전 대비
   antigravity:Stop)           CANON=SessionEnd ;;  # 향후 버전 대비
+  # Hermes Agent (셸 훅; 전처리는 hermes-event.sh). on_session_end 는 이름과 달리
+  # **턴마다** 발화(run_conversation 1회 = 1턴) → Stop. 진짜 세션 종료는 on_session_finalize.
+  hermes:on_session_start)       CANON=SessionStart ;;
+  hermes:pre_llm_call)           CANON=UserPromptSubmit ;;
+  hermes:on_session_end)         CANON=Stop ;;
+  hermes:pre_approval_request)   CANON=Notification ;;     # 위험 명령 승인 대기
+  hermes:post_approval_response) CANON=UserPromptSubmit ;; # 승인 응답 → 다시 작업 중
+  hermes:on_session_finalize)    CANON=SessionEnd ;;
   *) exit 0 ;;                                        # 모르는 이벤트는 조용히 무시
 esac
 

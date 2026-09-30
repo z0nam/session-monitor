@@ -1,6 +1,6 @@
 # session-monitor
 
-이 머신에서 돌아가는 **AI 코딩 에이전트 세션 전부**(Claude Code · Codex · Antigravity CLI)의
+이 머신에서 돌아가는 **AI 코딩 에이전트 세션 전부**(Claude Code · Codex · Antigravity CLI · Hermes Agent)의
 상태를 **각 에이전트의 hooks → SQLite**로 기록하는 모니터. cmux/tmux/일반 터미널 어디서
 떠도 동일하게 동작한다(특정 UI 비의존). 상태 판정은 훅 이벤트로만 — 결정론적, LLM 추측 없음.
 
@@ -12,13 +12,13 @@ Stop/Notification/SessionEnd)만 안다. 에이전트별 어댑터가 네이티�
 ① agent-event.sh case에 매핑 추가 ② 래퍼 1개 ③ `adapters/<agent>-hooks.json` 작성·심링크
 ④ `AGENT_BINS`(record-event.sh, bin/smon 상단)에 실행파일 basename 추가.
 
-| 표준 이벤트 | Claude Code | Codex | Antigravity(agy) |
-|---|---|---|---|
-| SessionStart | SessionStart | SessionStart | (없음 — 첫 이벤트가 세션 생성) |
-| UserPromptSubmit | UserPromptSubmit | UserPromptSubmit | PreInvocation |
-| Stop | Stop | Stop | PostInvocation |
-| Notification | Notification | PermissionRequest | (없음) |
-| SessionEnd | SessionEnd | (없음 — pid reap이 커버) | Stop |
+| 표준 이벤트 | Claude Code | Codex | Antigravity(agy) | Hermes |
+|---|---|---|---|---|
+| SessionStart | SessionStart | SessionStart | (없음 — 첫 이벤트가 세션 생성) | on_session_start |
+| UserPromptSubmit | UserPromptSubmit | UserPromptSubmit | PreInvocation | pre_llm_call, post_approval_response |
+| Stop | Stop | Stop | PostInvocation | on_session_end (**턴마다** 발화 — 이름과 달리) |
+| Notification | Notification | PermissionRequest | (없음) | pre_approval_request (smart 자동판정 제외) |
+| SessionEnd | SessionEnd | (없음 — pid reap이 커버) | Stop | on_session_finalize |
 
 어댑터 설치(SSOT는 repo, 설정 위치엔 심링크):
 - Codex: `~/.codex/hooks.json` → `adapters/codex-hooks.json`.
@@ -31,6 +31,19 @@ Stop/Notification/SessionEnd)만 안다. 에이전트별 어댑터가 네이티�
   폴링 — mtime 3분 내 RUNNING, 이후 WAITING_INPUT, 24h 경과·agy 프로세스 전멸 시 ENDED
   (**agy만 시간 휴리스틱** — pid 연결 불가). 첫 USER_REQUEST 한 줄을 summary로,
   file:// URI에서 프로젝트 경로를 best-effort 추정. 게이트가 열리면 훅 경로가 대체한다.
+- Hermes: `~/.hermes/config.yaml` 의 `hooks:` 섹션 (셸 훅). YAML 이라 심링크 대신 install.sh 가
+  `adapters/hermes-hooks.yaml`(한 줄 YAML flow)을 `hermes config set --force hooks` 로 적용하고,
+  첫 실행 승인 프롬프트를 피하려 `~/.hermes/shell-hooks-allowlist.json` 에 consent 를 기록한다.
+  **주의: hooks 키를 통째로 교체** — 다른 Hermes 셸 훅을 쓰게 되면 병합 로직으로 바꿀 것.
+  전처리 래퍼 `hooks/hermes-event.sh` 가 보정하는 것 (실측 2026-09-30, Hermes 소스 확인):
+  ① pid — 본체가 `~/.hermes/tools/python-*/bin/python3` 라 basename 매칭 불가 → 훅 PPID 를
+  `SMON_AGENT_PID` 로 직접 전달, `smon` reap 은 경로(`*/.hermes/*python3*`)로 생존 판정.
+  ② `delegate_task` 하위 에이전트도 같은 프로세스에서 훅을 쏜다 → `extra.platform=subagent`·
+  `extra.parent_session_id`·state.db 계보로 걸러냄 (압축 회전은 새 id 로 잇고 옛 id 는 ENDED).
+  ③ 전사 JSONL 이 없음 → `transcript_path=hermes-state:<id>` 의사경로, 워커·`smon grep` 이
+  `~/.hermes/state.db` 를 읽기전용으로 조회. ④ id `YYYYMMDD_HHMMSS_hex` 는 앞 8자가 날짜라
+  `hex-YYYYMMDD_HHMMSS` 로 뒤집어 저장 (`smon done` 은 `HERMES_SESSION_ID` 로 자기 세션 특정).
+  이미 떠 있는 Hermes 세션엔 소급되지 않는다(재시작 필요).
 
 ## 구성
 
