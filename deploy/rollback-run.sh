@@ -29,6 +29,7 @@ TS=$(date +%Y%m%d-%H%M%S)
 LA="$HOME/Library/LaunchAgents"
 PLISTS="com.namun.smon-worker com.namun.smon-pull com.namun.smon-report com.namun.parsec-awake"
 SQ=/usr/bin/sqlite3
+. "$(cd "$(dirname "$0")" && pwd)/lib-dbmove.sh"
 
 say()  { printf '%s\n' "$*"; }
 step() { printf '\n== %s\n' "$*"; }
@@ -117,23 +118,26 @@ step "DB $NEWDB -> $OLDDB"
 if [ ! -f "$NEWDB" ]; then say "  새 DB 없음 — 건너뜀"
 elif [ -f "$OLDDB" ]; then die "$OLDDB 가 이미 있음 — 수동 확인 필요"
 elif [ "$APPLY" = 1 ]; then
-  ok=0
-  for try in 1 2 3; do
-    rm -f "$OLDDB.tmp"
-    $SQ -cmd '.timeout 5000' "$NEWDB" ".backup '$OLDDB.tmp'"
-    [ "$($SQ "$OLDDB.tmp" 'PRAGMA integrity_check;')" = ok ] || die "integrity_check 실패"
-    A=$(tables_counts "$NEWDB"); B=$(tables_counts "$OLDDB.tmp")
-    if [ "$A" = "$B" ]; then ok=1; break; fi
-    say "  행수 불일치(시도 $try) — 재시도"; sleep 1
-  done
-  [ "$ok" = 1 ] || die "행수가 계속 어긋남"
-  $SQ -cmd '.timeout 5000' "$NEWDB" 'PRAGMA wal_checkpoint(TRUNCATE);' >/dev/null || true
+  # migrate 와 대칭: 스냅샷을 OLD 에 놓고 → NEW 를 치워 쓰기 대상을 되돌린 뒤 → NEW(치운 파일)의 늦은 쓰기를 병합.
+  # paths.sh 는 NEW 파일이 있는 동안 NEW 를 고르므로, 전환 시점은 NEW 를 rename 하는 순간이다.
+  WD="$DATA/rollback-$TS"; mkdir -p "$WD"
+  trap 'dbm_resume_launchd' EXIT
+  dbm_pause_launchd $PLISTS
+  dbm_check_tables "$NEWDB" || die "스키마에 병합 규칙 없는 테이블 — 중단"
+  dbm_snapshot "$NEWDB" "$OLDDB.tmp" || die ".backup/integrity 실패"
+  cp -p "$OLDDB.tmp" "$WD/base.db"
   mv "$OLDDB.tmp" "$OLDDB"
-  # 새 위치 파일이 남아 있으면 paths.sh 가 계속 그쪽을 고른다 → 이름을 바꿔 치운다(삭제 안 함)
-  for s in "" -wal -shm; do [ -e "$NEWDB$s" ] && mv "$NEWDB$s" "$NEWDB.rolledback-$TS$s"; done
-  say "  - 복원 ok ($B). 새 위치 파일 → $NEWDB.rolledback-$TS"
+  $SQ -cmd '.timeout 5000' "$NEWDB" 'PRAGMA wal_checkpoint(TRUNCATE);' >/dev/null || true
+  PARKED="$NEWDB.rolledback-$TS"
+  for s in "" -wal -shm; do [ -e "$NEWDB$s" ] && mv "$NEWDB$s" "$PARKED$s"; done
+  say "  - 스냅샷 → $OLDDB, 새 위치 파일 → $PARKED (쓰기 대상 되돌림)"
+  # rename 뒤에도 열린 핸들로 PARKED 에 쓰는 훅이 있을 수 있다 → 조용해질 때까지 병합
+  dbm_drain "$PARKED" "$OLDDB" "$WD/base.db" "$WD" || die "치운 파일이 계속 바뀜 — 조용할 때 다시 확인 ($PARKED vs $OLDDB)"
+  [ "$($SQ "$OLDDB" 'PRAGMA integrity_check;')" = ok ] || die "병합 후 integrity_check 실패"
+  say "  - 복원 ok. 행수: $(tables_counts "$OLDDB")"
 else
-  say "  [dry] sqlite3 NEW \".backup OLD.tmp\" → integrity_check → 행수 비교 → mv → NEW{,-wal,-shm} → .rolledback-$TS"
+  say "  [dry] launchd 일시정지 → NEW 스냅샷을 OLD 로 → NEW{,-wal,-shm} → .rolledback-$TS (쓰기 대상 되돌림)"
+  say "  [dry] 배수: 치운 파일이 조용해질 때까지 변경분을 OLD 로 병합 → launchd 재개"
 fi
 echo
 say "끝. 실행 체크아웃 $RUN 은 남겨 둔다(필요 없으면 직접 삭제)."

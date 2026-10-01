@@ -32,6 +32,7 @@ BK="$DATA/migrate-$TS"          # 백업·매니페스트 (rollback-run.sh 가 �
 LA="$HOME/Library/LaunchAgents"
 PLISTS="com.namun.smon-worker com.namun.smon-pull com.namun.smon-report com.namun.parsec-awake"
 SQ=/usr/bin/sqlite3
+. "$(cd "$(dirname "$0")" && pwd)/lib-dbmove.sh"
 
 say()  { printf '%s\n' "$*"; }
 step() { printf '\n== %s\n' "$*"; }
@@ -91,33 +92,49 @@ step "c. DB 이동 $OLDDB -> $NEWDB"
 if [ -f "$NEWDB" ] && [ ! -f "$OLDDB" ]; then
   say "  이미 이동됨 (새 DB 만 있음) — 건너뜀"
 elif [ -f "$NEWDB" ] && [ -f "$OLDDB" ]; then
-  die "두 위치에 모두 DB 가 있음 — 어느 쪽이 최신인지 수동 확인 필요"
+  # 앞선 실행이 배수 중 중단된 경우: 그 기준본으로 배수만 이어간다 (멱등)
+  PREV=$(ls -1d "$DATA"/migrate-*/ 2>/dev/null | while IFS= read -r d; do
+           [ -f "$d/base.db" ] && ! grep -q '^MIGRATED=' "$d/manifest" 2>/dev/null && echo "${d%/}"; done | tail -1)
+  [ -n "$PREV" ] || die "두 위치에 모두 DB 가 있는데 중단된 이전 기록이 없음 — 수동 확인 필요"
+  say "  이전 실행이 배수 중 중단됨 ($PREV) — 배수 재개"
+  if [ "$APPLY" = 1 ]; then
+    trap 'dbm_resume_launchd' EXIT
+    dbm_pause_launchd $PLISTS
+    dbm_drain "$OLDDB" "$NEWDB" "$PREV/base.db" "$PREV" || die "옛 DB 가 계속 바뀜 — 조용할 때 다시"
+    $SQ -cmd '.timeout 5000' "$OLDDB" 'PRAGMA wal_checkpoint(TRUNCATE);' >/dev/null || true
+    for s in "" -wal -shm; do [ -e "$OLDDB$s" ] && mv "$OLDDB$s" "$DEV/sessions.db.migrated-$TS$s"; done
+    echo "OLDDB=$OLDDB" >> "$PREV/manifest"; echo "MIGRATED=$DEV/sessions.db.migrated-$TS" >> "$PREV/manifest"
+    BK=$PREV
+    say "  - 구 DB → $DEV/sessions.db.migrated-$TS"
+  fi
 else
   say "  현재 행수: $(tables_counts "$OLDDB")"
   if [ "$APPLY" = 1 ]; then
     mkdir -p "$DATA" "$BK"
-    ok=0
-    for try in 1 2 3; do   # 백업 도중 훅이 쓰면 행수가 어긋난다 → 재시도
-      rm -f "$NEWDB.tmp"
-      $SQ -cmd '.timeout 5000' "$OLDDB" ".backup '$NEWDB.tmp'"
-      [ "$($SQ "$NEWDB.tmp" 'PRAGMA integrity_check;')" = ok ] || die "integrity_check 실패 ($NEWDB.tmp)"
-      A=$(tables_counts "$OLDDB"); B=$(tables_counts "$NEWDB.tmp")
-      if [ "$A" = "$B" ]; then ok=1; break; fi
-      say "  행수 불일치(시도 $try) — 재시도"; sleep 1
-    done
-    [ "$ok" = 1 ] || die "행수가 계속 어긋남 — 훅 활동이 잦다. 조용할 때 다시"
-    say "  - .backup + integrity_check ok, 행수 일치: $B"
-    $SQ -cmd '.timeout 5000' "$OLDDB" 'PRAGMA wal_checkpoint(TRUNCATE);' >/dev/null || true
+    # 멈출 수 있는 쓰기(launchd 워커·pull·리포트)는 멈춘다. 실패로 중단돼도 되살린다.
+    trap 'dbm_resume_launchd' EXIT
+    dbm_pause_launchd $PLISTS
+    dbm_check_tables "$OLDDB" || die "스키마에 병합 규칙 없는 테이블 — 이전 중단"
+    # 1) 일관 스냅샷을 새 위치에 놓아 쓰기 대상을 전환 (paths.sh 는 새 파일이 생긴 순간부터 그쪽을 고른다)
+    dbm_snapshot "$OLDDB" "$NEWDB.tmp" || die ".backup/integrity 실패"
+    cp -p "$NEWDB.tmp" "$BK/base.db"
     mv "$NEWDB.tmp" "$NEWDB"
-    # 새 DB 가 생긴 순간부터 paths.sh 는 새 DB 를 고른다. 구 파일은 지우지 않고 이름만 바꾼다.
+    say "  - 스냅샷 → $NEWDB (쓰기 대상 전환), 기준본 $BK/base.db"
+    # 2) 전환 직전에 경로를 해석한 훅의 늦은 쓰기를 병합 — 옛 DB 가 조용해질 때까지
+    say "  - 배수: ${DRAIN_GRACE}s 간격 최대 ${DRAIN_ROUNDS}회 (행수가 아니라 덤프 해시로 변화 감지, UPDATE 포함)"
+    dbm_drain "$OLDDB" "$NEWDB" "$BK/base.db" "$BK" || die "옛 DB 가 계속 바뀜 — 구 경로 훅이 아직 해석 중? 새 DB 는 유지됨. 조용할 때 다시(멱등) 또는 rollback"
+    [ "$($SQ "$NEWDB" 'PRAGMA integrity_check;')" = ok ] || die "병합 후 integrity_check 실패 ($NEWDB)"
+    # 3) 조용해진 뒤에만 옛 파일을 보관 이름으로 (삭제 안 함)
+    $SQ -cmd '.timeout 5000' "$OLDDB" 'PRAGMA wal_checkpoint(TRUNCATE);' >/dev/null || true
     for s in "" -wal -shm; do
       [ -e "$OLDDB$s" ] && mv "$OLDDB$s" "$DEV/sessions.db.migrated-$TS$s"
     done
     echo "OLDDB=$OLDDB" >> "$BK/manifest"; echo "MIGRATED=$DEV/sessions.db.migrated-$TS" >> "$BK/manifest"
-    say "  - 구 DB → $DEV/sessions.db.migrated-$TS (+wal/shm)"
+    say "  - 구 DB → $DEV/sessions.db.migrated-$TS (+wal/shm). 행수: $(tables_counts "$NEWDB")"
   else
-    say "  [dry] sqlite3 OLD \".backup NEW.tmp\" → integrity_check → 테이블별 행수 비교(불일치 시 3회 재시도) → mv NEW.tmp NEW"
-    say "  [dry] wal_checkpoint(TRUNCATE) 후 OLD{,-wal,-shm} → sessions.db.migrated-$TS{,-wal,-shm} (삭제 안 함)"
+    say "  [dry] launchd 쓰기 작업 일시정지 → .backup 스냅샷을 NEW 로 (쓰기 대상 전환) + 기준본 보관"
+    say "  [dry] 배수: ${DRAIN_GRACE}s마다 OLD 재스냅샷 → 덤프 해시가 기준본과 같아질 때까지 변경분을 NEW 로 병합 (최대 ${DRAIN_ROUNDS}회)"
+    say "  [dry] 조용해지면 OLD{,-wal,-shm} → sessions.db.migrated-$TS{,-wal,-shm} (삭제 안 함), launchd 재개"
   fi
 fi
 
