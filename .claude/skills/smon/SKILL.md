@@ -10,7 +10,7 @@ description: >
 # smon — AI 에이전트 세션 모니터 (Claude Code · Codex · Antigravity · Hermes)
 
 어느 폴더·어느 에이전트에서든 PATH의 셸 명령 `smon`으로 실행한다.
-데이터는 훅이 SQLite(`~/dev/session-monitor/sessions.db`)에 결정론적으로 쌓은 것
+데이터는 훅이 SQLite(`~/.local/share/smon/sessions.db`, 이전 전엔 `~/dev/session-monitor/sessions.db`)에 결정론적으로 쌓은 것
 (상태 판정에 LLM 추측 없음). 요약(SUMMARY)만 로컬 Ollama가 2분 주기로 생성.
 
 ## 명령

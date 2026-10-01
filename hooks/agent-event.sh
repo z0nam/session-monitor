@@ -2,6 +2,10 @@
 # 에이전트 네이티브 훅 이벤트 → 표준 이벤트 번역기.
 # 사용: agent-event.sh <agent>  (stdin: 훅 JSON; hook_event_name에서 네이티브 이벤트를 읽음)
 # 새 에이전트 추가 = 아래 case에 매핑 몇 줄 + 얇은 래퍼(<agent>-event.sh) + 어댑터 훅 설정.
+# 경로 해석(SMON_HOME·SMON_DB) — lib/paths.sh. 심링크로 불릴 때만 readlink 1회(평소 0 fork).
+_s=${BASH_SOURCE[0]}; [ -L "$_s" ] && _s=$(readlink -f "$_s" 2>/dev/null || readlink "$_s")
+case $_s in */*) ;; *) _s=./$_s ;; esac
+. "${_s%/*}/../lib/paths.sh"
 AGENT="${1:-unknown}"
 INPUT=$(cat)
 NATIVE=$(printf '%s' "$INPUT" | /usr/bin/jq -r '.hook_event_name // empty' 2>/dev/null)
@@ -30,5 +34,5 @@ case "$AGENT:$NATIVE" in
   *) exit 0 ;;                                        # 모르는 이벤트는 조용히 무시
 esac
 
-printf '%s' "$INPUT" | "$HOME/dev/session-monitor/hooks/record-event.sh" "$CANON" "$AGENT"
+printf '%s' "$INPUT" | "$SMON_HOME/hooks/record-event.sh" "$CANON" "$AGENT"
 exit 0

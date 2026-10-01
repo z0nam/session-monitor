@@ -16,7 +16,11 @@
 #     같은 날 세션끼리 겹친다 → smon 에는 `hex-YYYYMMDD_HHMMSS` 로 뒤집어 저장.
 #     `smon done` 의 HERMES_SESSION_ID 조회도 같은 변환을 쓴다(bin/smon).
 # 어떤 실패든 exit 0 + stdout 은 {} (Hermes 훅 프로토콜; 빈 출력도 허용되지만 명시).
-DB="$HOME/dev/session-monitor/sessions.db"
+# 경로 해석(SMON_HOME·SMON_DB) — lib/paths.sh. 심링크로 불릴 때만 readlink 1회(평소 0 fork).
+_s=${BASH_SOURCE[0]}; [ -L "$_s" ] && _s=$(readlink -f "$_s" 2>/dev/null || readlink "$_s")
+case $_s in */*) ;; *) _s=./$_s ;; esac
+. "${_s%/*}/../lib/paths.sh"
+DB="$SMON_DB"
 HSTATE="${HERMES_HOME:-$HOME/.hermes}/state.db"
 smon_id() { case "$1" in *_*_*) printf '%s-%s' "${1##*_}" "${1%_*}" ;; *) printf '%s' "$1" ;; esac; }
 raw_id()  { case "$1" in *-*_*) printf '%s_%s' "${1#*-}" "${1%%-*}" ;; *) printf '%s' "$1" ;; esac; }
@@ -71,7 +75,7 @@ sq() { printf '%s' "$1" | sed "s/'/''/g"; }
       transcript_path: ("hermes-state:" + $raw),
       turn_exit_reason: .extra.turn_exit_reason, platform: .extra.platform,
       model: .extra.model}' \
-  | SMON_AGENT_PID="$HPID" "$HOME/dev/session-monitor/hooks/agent-event.sh" hermes
+  | SMON_AGENT_PID="$HPID" "$SMON_HOME/hooks/agent-event.sh" hermes
 } >/dev/null 2>&1
 printf '{}\n'
 exit 0

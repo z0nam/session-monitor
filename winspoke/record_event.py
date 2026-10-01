@@ -17,7 +17,7 @@ import subprocess
 import sys
 import time
 
-DB = os.path.join(os.path.expanduser("~"), "dev", "session-monitor", "sessions.db")
+DB = os.environ.get("SMON_DB") or os.path.join(os.path.expanduser("~"), "dev", "session-monitor", "sessions.db")
 AGENT_EXES = ("claude", "codex", "agy")
 STRIP_FIELDS = ("prompt", "last_assistant_message", "last-assistant-message",
                 "input_messages", "input-messages")

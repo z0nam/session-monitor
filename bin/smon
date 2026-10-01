@@ -2,7 +2,15 @@
 # smon — Claude Code 세션 모니터 보드 (session-monitor Phase 1)
 # 사용: smon | smon all | smon find <검색어> | smon grep <검색어> | smon tail <sid> | smon prune | smon backfill
 set -euo pipefail
-DB="$HOME/dev/session-monitor/sessions.db"
+# 경로 해석 — ~/.local/bin/smon 심링크로 불리므로 실경로를 따라가 레포(SMON_HOME)를 찾는다.
+# readlink -f 는 macOS 13+ 에서 동작. 실패하면 python realpath (훅 핫패스 아님).
+_s=${BASH_SOURCE[0]}
+if [ -L "$_s" ]; then
+  _s=$(readlink -f "$_s" 2>/dev/null || /usr/bin/python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$_s")
+fi
+case $_s in */*) ;; *) _s=./$_s ;; esac
+. "${_s%/*}/../lib/paths.sh"
+DB="$SMON_DB"
 [ -f "$DB" ] || { echo "no db: $DB" >&2; exit 1; }
 
 Q() { sqlite3 -separator '|' -cmd '.timeout 500' "$DB" "$1"; }
@@ -33,7 +41,7 @@ reconcile_colors() {
      WHERE cmux_ws IS NOT NULL AND cmux_ws != ''
        AND COALESCE(tab_want,'') != COALESCE(tab_color,'')
      LIMIT $lim;" | while IFS='|' read -r sid want ws; do
-    if "$HOME/dev/session-monitor/hooks/apply-color.sh" "$ws" "$want"; then
+    if "$SMON_HOME/hooks/apply-color.sh" "$ws" "$want"; then
       Q "UPDATE sessions SET tab_color='$want' WHERE session_id='$sid';" >/dev/null
     fi
   done
@@ -208,13 +216,16 @@ case "${1:-}" in
       done
       return 1
     }
+    # 원격 맥의 smon 경로 — 원격 머신은 범위 밖이라 기존 경로 유지(원격 셸이 $HOME 확장), env 로만 override.
+    _remote_def='"$HOME/dev/session-monitor/bin/smon"'
+    REMOTE_BIN="${SMON_REMOTE_BIN:-$_remote_def}"
     WIN_CMD_CMD='python "%USERPROFILE%\dev\session-monitor\winspoke\record_event.py" export'
     WIN_CMD_PS1='python "$env:USERPROFILE\dev\session-monitor\winspoke\record_event.py" export'
     for h in $HOSTS $HOSTS_WIN; do
       TMP=$(mktemp)
       case " $HOSTS_WIN " in
         *" $h "*) FETCH_OK=$(fetch "$h" "$TMP" "$WIN_CMD_CMD" "$WIN_CMD_PS1" && echo y) ;;
-        *)        FETCH_OK=$(fetch "$h" "$TMP" '"$HOME/dev/session-monitor/bin/smon" export' && echo y) ;;
+        *)        FETCH_OK=$(fetch "$h" "$TMP" "$REMOTE_BIN export" && echo y) ;;
       esac
       if [ "$FETCH_OK" = y ]; then
         Q "BEGIN;
@@ -378,12 +389,12 @@ case "${1:-}" in
     ;;
   work)
     # 요약 워커 1패스 (launchd가 주기 실행하는 것과 동일)
-    exec python3 "$HOME/dev/session-monitor/worker/summarize.py"
+    SMON_DB="$DB" exec python3 "$SMON_HOME/worker/summarize.py"
     ;;
   grep)
     # 세션 전사 전문검색 (find=요약만 vs grep=대화 원문). 로컬 전사만 대상.
     shift
-    exec python3 "$HOME/dev/session-monitor/worker/grep_transcripts.py" "$@"
+    SMON_DB="$DB" exec python3 "$SMON_HOME/worker/grep_transcripts.py" "$@"
     ;;
   tokens)
     # 여러 기계 토큰 사용량 집계 → 개인/업무 요약 + 무손실 CSV.
@@ -391,7 +402,7 @@ case "${1:-}" in
     #   smon tokens              # 요약 + 오늘자 CSV(~/.local/share/smon/)
     #   smon tokens --csv PATH    # CSV 경로 지정
     shift
-    exec python3 "$HOME/dev/session-monitor/worker/token_usage.py" "$@"
+    SMON_DB="$DB" exec python3 "$SMON_HOME/worker/token_usage.py" "$@"
     ;;
   *)
     echo "usage: smon [all | find <검색어> | grep <검색어> | tokens [--csv PATH] | report | tail <sid> | done [sid] | dir [sid] | ack <sid> | prune | backfill | model [이름] | work | export | pull]" >&2; exit 1

@@ -16,7 +16,16 @@
 import os, re, sys, json, socket, sqlite3, subprocess, time
 
 HOME = os.path.expanduser("~")
-DB = os.path.join(HOME, "dev/session-monitor/sessions.db")
+def _resolve_db():
+    """DB 경로: env SMON_DB > ~/.local/share/smon/sessions.db(있으면) > ~/dev/session-monitor/sessions.db (lib/paths.sh 와 동일 규칙)."""
+    if os.environ.get("SMON_DB"):
+        return os.environ["SMON_DB"]
+    new = os.path.expanduser("~/.local/share/smon/sessions.db")
+    return new if os.path.isfile(new) else os.path.expanduser("~/dev/session-monitor/sessions.db")
+
+
+SMON_HOME = os.environ.get("SMON_HOME") or os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+DB = _resolve_db()
 CLAUDE_ROOT = os.path.join(HOME, ".claude/projects")
 CODEX_ROOT = os.path.join(HOME, ".codex/sessions")
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
