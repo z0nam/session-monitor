@@ -6,8 +6,17 @@
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
-echo "== schema (idempotent)"
-/usr/bin/sqlite3 "$DIR/sessions.db" < "$DIR/schema.sql"
+# DB 경로는 lib/paths.sh 규칙 (SMON_DB > ~/.local/share/smon/sessions.db > 레거시 레포 경로).
+# 신규 설치(어디에도 DB 없음)면 새 기본 위치 ~/.local/share/smon 에 만든다.
+_env_db=${SMON_DB:-}
+. "$DIR/lib/paths.sh"
+if [ ! -f "$SMON_DB" ] && [ -z "$_env_db" ]; then
+  mkdir -p "$SMON_DATA_DIR"
+  SMON_DB="$SMON_DATA_DIR/sessions.db"
+fi
+echo "== schema (idempotent) -> $SMON_DB"
+mkdir -p "$(dirname "$SMON_DB")"
+/usr/bin/sqlite3 "$SMON_DB" < "$DIR/schema.sql"
 
 echo "== smon -> ~/.local/bin"
 mkdir -p "$HOME/.local/bin"

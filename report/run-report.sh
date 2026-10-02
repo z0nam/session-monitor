@@ -5,7 +5,9 @@
 # 아침 브리핑(08:00, calendar-worklog)과 나란히 도는 형제 잡. 나중에 합칠 대상.
 set -uo pipefail
 
-REPO="$HOME/dev/session-monitor"
+# 레포 = 이 스크립트의 상위 폴더 (launchd 는 실경로로 부르므로 심링크 해석 불필요). SMON_HOME 으로 override.
+_s=${BASH_SOURCE[0]}; case $_s in */*) ;; *) _s=./$_s ;; esac
+REPO="${SMON_HOME:-$(cd "${_s%/*}/.." && pwd)}"
 LOGDIR="$REPO/report/logs"
 LOG="$LOGDIR/$(date +%Y-%m-%d).log"
 TIMEOUT=420          # 7분. 브리핑보다 가볍다(외부 fetch 없음). 넘으면 죽이고 실패.

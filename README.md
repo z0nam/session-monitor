@@ -50,9 +50,49 @@ Stop/Notification/SessionEnd)만 안다. 에이전트별 어댑터가 네이티�
 ```
 schema.sql              # DB 스키마 (sessions, events; WAL)
 hooks/record-event.sh   # 단일 훅 디스패처 — 이벤트명을 $1로 받음
+lib/paths.sh            # 경로 해석 SSOT (SMON_HOME·SMON_DB) — 모든 bash 스크립트가 source
 bin/smon                # 조회 CLI (~/.local/bin/smon 심링크)
-sessions.db             # 데이터 (gitignore)
+deploy/                 # launchd 템플릿, migrate-to-run.sh / rollback-run.sh
 ```
+
+데이터(`sessions.db`)는 레포 밖 `~/.local/share/smon/sessions.db` 가 기본이다
+(이전 전 설치는 레포 안 `sessions.db` — 아래 "배포 폴더(-run)와 DB 위치").
+
+## 배포 폴더(-run)와 DB 위치
+
+개발 체크아웃(`~/dev/session-monitor`)이 곧 라이브 설치라, 브랜치를 바꾸거나 고치는 중인 코드가
+그대로 수십 개 세션의 훅으로 돈다. 그래서 둘을 나눈다.
+
+- **개발**: `~/dev/session-monitor` — 브랜치·PR 작업만 한다. 훅·launchd 는 여기를 가리키지 않는다.
+- **실행**: `~/dev/session-monitor-run` — `git clone` 한 main 추적 체크아웃. 훅·launchd·`~/.local/bin/smon`·
+  스킬 심링크가 전부 여기를 가리킨다. 직접 고치지 않는다.
+- **배포 = PR 머지 후 `git -C ~/dev/session-monitor-run pull --ff-only`.** 그게 전부다
+  (훅 스크립트는 다음 이벤트부터 새 코드로 돈다. 설정 경로는 그대로라 재등록 불필요).
+
+DB 경로는 `lib/paths.sh`(파이썬은 각 워커의 `_resolve_db()`)가 정한다. 우선순위:
+
+1. `SMON_DB` 환경변수
+2. `~/.local/share/smon/sessions.db` — **파일이 있으면**
+3. `~/dev/session-monitor/sessions.db` — 레거시 기본
+
+파일이 있으면 그쪽을 고르므로 DB 이전은 파일 이동뿐이다(코드·설정 변경 없음). 형제 스크립트는
+`SMON_HOME`(기본 = 스크립트 실위치의 레포 루트)에서 찾으니 어느 체크아웃에서 돌든 자기 코드를 쓴다.
+`apply-color.log` 도 `~/.local/share/smon/` 이 있으면 그리로 간다. 원격 맥 `smon export` 경로는
+`SMON_REMOTE_BIN` 으로 바꿀 수 있다(기본은 기존 `~/dev/session-monitor/bin/smon`).
+
+전환은 한 번, 조용한 시간대에 한다(이 PR 머지 + 개발 체크아웃 `git pull` 이 선행 조건).
+
+```bash
+deploy/migrate-to-run.sh            # dry-run — 할 일만 출력
+deploy/migrate-to-run.sh --apply    # RUNNING 세션 있으면 중단 (--force 로 무시)
+deploy/rollback-run.sh [백업폴더] [--apply]   # 되돌리기 (기본 dry-run)
+```
+
+migrate 순서: 사전점검(RUNNING·체크아웃 clean) → `-run` clone/pull → DB 를 `sqlite3 .backup` 으로 복사·
+`integrity_check`·행수 대조 후 구 파일은 `sessions.db.migrated-<시각>` 으로 이름만 바꿈 → 훅 경로 교체
+(claude settings.json·codex/agy hooks.json·Hermes hooks+allowlist) → launchd plist 경로 교체·재적재 →
+`~/.local/bin/smon`·스킬 심링크 교체 → 새 경로로 합성 이벤트 1건을 쏴 새 DB 에 들어오는지 확인 후 삭제.
+바꾼 파일은 전부 `~/.local/share/smon/migrate-<시각>/` 에 백업하고, rollback 이 그걸 쓴다.
 
 훅은 `~/.claude/settings.json`(user level)에 이벤트별로 등록되어 있다.
 새로 뜨는 세션부터 적용 (이미 떠 있는 세션엔 소급 안 됨).

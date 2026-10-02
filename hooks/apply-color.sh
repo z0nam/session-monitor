@@ -5,7 +5,11 @@
 # 반드시 세션(훅/사용자 셸) 컨텍스트에서 부를 것. 상한 3초 (cmux hang 대비).
 WS="$1" COLOR="$2"
 CMUX="${CMUX_BUNDLED_CLI_PATH:-/Applications/cmux.app/Contents/Resources/bin/cmux}"
-LOG="$HOME/dev/session-monitor/apply-color.log"
+# 로그: ~/.local/share/smon 이 있으면 거기(DB 이전 후), 없으면 레거시 레포 경로. SMON_COLOR_LOG 로 override.
+if [ -n "${SMON_COLOR_LOG:-}" ]; then LOG=$SMON_COLOR_LOG
+elif [ -d "$HOME/.local/share/smon" ]; then LOG="$HOME/.local/share/smon/apply-color.log"
+else LOG="$HOME/dev/session-monitor/apply-color.log"
+fi
 [ -n "$WS" ] && [ -x "$CMUX" ] || exit 1
 
 run() { perl -e 'alarm 3; exec @ARGV' -- "$@"; }   # macOS엔 timeout(1) 없음 — perl alarm

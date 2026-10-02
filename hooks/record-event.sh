@@ -7,7 +7,11 @@
 #              PermissionRequest → Notification, agy의 PostInvocation → Stop).
 # stdin: 훅 JSON (세 에이전트 모두 session_id/cwd/transcript_path 공통).
 # 어떤 실패든 exit 0 (세션 방해 금지). 대화 내용 필드는 DB에 저장하지 않는다.
-DB="$HOME/dev/session-monitor/sessions.db"
+# 경로 해석(SMON_HOME·SMON_DB) — lib/paths.sh. 심링크로 불릴 때만 readlink 1회(평소 0 fork).
+_s=${BASH_SOURCE[0]}; [ -L "$_s" ] && _s=$(readlink -f "$_s" 2>/dev/null || readlink "$_s")
+case $_s in */*) ;; *) _s=./$_s ;; esac
+. "${_s%/*}/../lib/paths.sh"
+DB="$SMON_DB"
 EVENT="${1:-Unknown}"
 AGENT="${2:-claude}"
 # pid 탐색에서 인정할 에이전트 실행파일 basename (새 에이전트 추가 시 여기+smon)
@@ -128,7 +132,7 @@ SQL
       AND COALESCE(tab_want,'') != COALESCE(tab_color,'')
     ORDER BY CASE WHEN session_id='$(sq "$SESSION_ID")' THEN 0 ELSE 1 END
     LIMIT 3;" | while IFS='|' read -r RSID RWANT RWS; do
-    if "$HOME/dev/session-monitor/hooks/apply-color.sh" "$RWS" "$RWANT"; then
+    if "$SMON_HOME/hooks/apply-color.sh" "$RWS" "$RWANT"; then
       /usr/bin/sqlite3 "$DB" "PRAGMA busy_timeout=200;
         UPDATE sessions SET tab_color='$RWANT' WHERE session_id='$RSID';"
     fi

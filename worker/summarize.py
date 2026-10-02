@@ -14,7 +14,16 @@ import time
 import urllib.error
 import urllib.request
 
-DB = os.path.expanduser("~/dev/session-monitor/sessions.db")
+def _resolve_db():
+    """DB 경로: env SMON_DB > ~/.local/share/smon/sessions.db(있으면) > ~/dev/session-monitor/sessions.db (lib/paths.sh 와 동일 규칙)."""
+    if os.environ.get("SMON_DB"):
+        return os.environ["SMON_DB"]
+    new = os.path.expanduser("~/.local/share/smon/sessions.db")
+    return new if os.path.isfile(new) else os.path.expanduser("~/dev/session-monitor/sessions.db")
+
+
+SMON_HOME = os.environ.get("SMON_HOME") or os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+DB = _resolve_db()
 OLLAMA = os.environ.get("SMON_OLLAMA_URL", "http://localhost:11434")
 DEFAULT_MODEL = "qwen3:30b-a3b"
 EXCERPT_CHARS = 6000     # transcript 발췌 상한 (꼬리 우선)
