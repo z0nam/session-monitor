@@ -28,8 +28,15 @@
        (기본 ~/dev/ji-slack-admin/slack-directory/.env 의 SLACK_USER_TOKEN, namun-admin-cli 앱)
 필요 scope: 둘 다 chat:write, canvases:write (사용자 토큰은 + im:write, canvases:read 권장)
 
-stdout: CANVAS_ID=… / CANVAS_URL=… / REPORT_DM_TS=…
+stdout: CANVAS_ID=… / CANVAS_URL=… / REPORT_DM_TS=… / (옵션) HERMES_POST_TS=…
 종료코드: 0 성공 / 1 실패. 러너가 이 코드로 판정하므로 거짓 성공을 내지 않는다.
+
+Hermes 피드백 채널 (옵션, $REPORT_HERMES_CHANNEL)
+  값이 있으면 주 발송(캔버스+DM) 뒤 그 채널에 포인터를 **봇 토큰으로** 추가로 남긴다
+  (#hermes-namun 등 free_response 채널). 거기서 "X 끝/일단락"으로 답하면 Hermes 의
+  smon-feedback 스킬이 보드에 되먹임한다. 봇 신분이 필수 — 사용자 신분 글은 Hermes 가
+  프롬프트로 받아 자기트리거한다. 봇 토큰이 없거나 실패해도 주 발송은 이미 끝났으므로
+  경고만 찍고 0 으로 끝낸다(스트릭 보존). 봇은 그 채널의 멤버여야 하고 chat:write 필요.
 """
 import datetime
 import json
@@ -223,6 +230,36 @@ def main():
         sys.exit(f"post-report: DM 거부 — {m.get('error')} (캔버스 {cid} 는 생성됨)")
     print(f"REPORT_DM_TS={m.get('ts')}")
     print(f"REPORT_DM_CHANNEL={m.get('channel')}")
+
+    # (선택) Hermes 피드백 채널(#hermes-namun 등)에도 포인터를 남긴다 — 리포트를 읽은 그 자리에서
+    # "X 끝/일단락"으로 답하면 Hermes(smon-feedback 스킬)가 보드에 되먹임한다.
+    # **반드시 봇 신분으로** 올린다: free_response 채널이라 사용자 신분 글은 Hermes 가 프롬프트로
+    # 받아 자기트리거한다(봇 글은 무시). 봇 토큰이 없거나 실패해도 **주 발송(위)은 이미 성공**이므로
+    # 경고만 찍고 넘어간다 — 리포트 성공 판정(러너)을 깨지 않는다.
+    hchan = (os.environ.get("REPORT_HERMES_CHANNEL") or "").strip()
+    if hchan:
+        bt = read_bot_token()
+        if not bt:
+            print("HERMES_POST=skip-no-bot-token")
+        else:
+            try:
+                bw = api(bt, "auth.test", {})
+                if not bw.get("ok") or not bw.get("bot_id"):
+                    print(f"HERMES_POST=skip-not-bot({bw.get('error') or bw.get('user')})")
+                else:
+                    hm = api(bt, "chat.postMessage", {
+                        "channel": hchan,
+                        "text": (f":clipboard: 오늘 smon 리포트 → {url}\n"
+                                 "끝났거나 일단락된 프로젝트를 알려주면 보드에 반영할게 "
+                                 "(예: \"IRB 끝, G20 일단락\")."),
+                    })
+                    if hm.get("ok"):
+                        print(f"HERMES_POST_TS={hm.get('ts')}")
+                        print(f"HERMES_POST_CHANNEL={hm.get('channel')}")
+                    else:
+                        print(f"HERMES_POST=fail({hm.get('error')})")
+            except Exception as e:
+                print(f"HERMES_POST=fail({e})")
 
 
 if __name__ == "__main__":
