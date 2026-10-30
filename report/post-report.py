@@ -238,11 +238,13 @@ def main():
     # 경고만 찍고 넘어간다 — 리포트 성공 판정(러너)을 깨지 않는다.
     hchan = (os.environ.get("REPORT_HERMES_CHANNEL") or "").strip()
     if hchan:
-        bt = read_bot_token()
-        if not bt:
-            print("HERMES_POST=skip-no-bot-token")
-        else:
-            try:
+        # 토큰 읽기(디렉터리·권한 오류로 raise 가능)까지 전부 try 안에 둔다 — 주 발송은
+        # 이미 끝났으므로 이 경로의 어떤 실패도 비치명적이어야 한다(경고만, exit 0 유지).
+        try:
+            bt = read_bot_token()
+            if not bt:
+                print("HERMES_POST=skip-no-bot-token")
+            else:
                 bw = api(bt, "auth.test", {})
                 if not bw.get("ok") or not bw.get("bot_id"):
                     print(f"HERMES_POST=skip-not-bot({bw.get('error') or bw.get('user')})")
@@ -258,8 +260,8 @@ def main():
                         print(f"HERMES_POST_CHANNEL={hm.get('channel')}")
                     else:
                         print(f"HERMES_POST=fail({hm.get('error')})")
-            except Exception as e:
-                print(f"HERMES_POST=fail({e})")
+        except Exception as e:
+            print(f"HERMES_POST=fail({e})")
 
 
 if __name__ == "__main__":
