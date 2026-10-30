@@ -29,3 +29,10 @@ SLACK_SELF="U0XXXXXXXXX"
 
 # (선택) 오늘 것이 이미 갔는지 Slack 검색으로 확인(기본 1). 사용자 토큰(search:read)일 때만 동작.
 # REPORT_DEDUP=1
+
+# (선택) Hermes 피드백 채널 ID. 지정하면 주 발송(캔버스+DM) 뒤 이 채널에도 포인터를
+#   **봇 토큰으로** 남긴다 — 그 자리에서 "X 끝/일단락"으로 답하면 Hermes(smon-feedback
+#   스킬)가 보드에 되먹임한다. free_response 채널이라 사용자 신분 글은 Hermes 가 자기트리거하므로
+#   반드시 봇 신분이다(봇 토큰 없으면 이 게시만 건너뜀, 주 발송은 정상). 봇이 그 채널 멤버여야 함.
+#   채널 ID: Slack 채널 → 상세 → 하단 "채널 ID 복사".
+# REPORT_HERMES_CHANNEL="C0C67CX2VB3"
