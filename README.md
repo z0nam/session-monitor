@@ -123,7 +123,7 @@ worklog(`calendar-worklog`)와 헷갈리기 쉬운데 경계는 이렇다.
 |---|---|---|
 | SessionStart | RUNNING | upsert; started_at, git_branch, source(터미널 추정), pid 기록 |
 | UserPromptSubmit | RUNNING | |
-| Stop | WAITING_INPUT | 턴 종료 = 입력 대기 |
+| Stop | WAITING_INPUT | 턴 종료 = 입력 대기. 단 마지막 응답의 첫 줄이 `🚨`로 시작하면 NEEDS_ATTENTION(탭 Red) — agent-rules 「답 필요면 첫 줄에 🚨」 규칙과 짝. 판정 불리언만 쓰고 응답 본문은 저장 안 함 |
 | Notification | NEEDS_ATTENTION | 권한 요청·유휴 등; `notification_type` 보존 |
 | SessionEnd | ENDED | ended_at 기록 |
 
