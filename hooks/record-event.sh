@@ -23,9 +23,12 @@ AGENT_BINS="claude|codex|agy"
   # jq 한 번에 세 줄로 추출: session_id / cwd / 정제된 payload(jq가 한 줄 JSON으로 출력)
   PARSED=$(printf '%s' "$INPUT" | /usr/bin/jq -r \
     '(.session_id // ""), (.cwd // ""), (.notification_type // ""),
+     (((.last_assistant_message // ."last-assistant-message" // "") | tostring
+       | [splits("\n")] | map(select(test("\\S"))) | (.[0] // "")
+       | sub("^\\s+"; "") | startswith("🚨")) | if . then "1" else "" end),
      (del(.prompt, .last_assistant_message, ."last-assistant-message",
           .input_messages, ."input-messages") | tojson)') || exit 0
-  { IFS= read -r SESSION_ID; IFS= read -r CWD; IFS= read -r NTYPE; IFS= read -r PAYLOAD; } <<< "$PARSED"
+  { IFS= read -r SESSION_ID; IFS= read -r CWD; IFS= read -r NTYPE; IFS= read -r ASK; IFS= read -r PAYLOAD; } <<< "$PARSED"
   [ -n "$SESSION_ID" ] || exit 0
 
   NOW=$(date +%s)
@@ -57,6 +60,11 @@ AGENT_BINS="claude|codex|agy"
   # idle 알림("입력 기다리는 중")은 주의 요청이 아니다 — 상태 유지, 기록만.
   # 진짜 NEEDS_ATTENTION은 permission_prompt 등 idle 아닌 Notification뿐.
   [ "$EVENT" = Notification ] && [ "$NTYPE" = idle_prompt ] && STATE=
+  # 답 필요 표식(agent-rules GLOBAL.md "응답 첫 줄에 🚨"): 마지막 응답의 첫 비어있지 않은 줄이
+  # 🚨로 시작하면 Stop을 주의(Red)로 올린다. 질문을 보고 끝에 묻어 둔 채 대기해 사용자가
+  # 끝난 줄 알고 넘어가는 일을 막는다(2026-11-11 마감 놓친 건). 판정은 첫 줄만 — 본문 인용 오탐 방지.
+  # 해제는 기존대로 다음 UserPromptSubmit(RUNNING). 대화 내용 자체는 저장하지 않는다(불리언만).
+  [ "$EVENT" = Stop ] && [ "$ASK" = 1 ] && STATE=NEEDS_ATTENTION
 
   # branch/source는 SessionStart 또는 첫 이벤트에서만 (50ms 예산 보호).
   # 첫 이벤트 조건은 SessionStart가 없는 에이전트(agy) 때문에 필요.
