@@ -309,6 +309,20 @@ case "${1:-}" in
     reconcile_colors 100
     echo "repainted"
     ;;
+  clearok)
+    # 조율 세션이 "이 세션은 clear 해도 된다" 고 표시: cmux 탭 이름 앞에 🟢. 사용자가 그 세션에 입력하면 자동으로 떨어진다.
+    # smon clearok <sid 앞자리>  ·  smon clearok --undo <sid 앞자리>
+    OP=mark; [ "${2:-}" = --undo ] && { OP=unmark; shift; }
+    PREFIX="${2:?usage: smon clearok [--undo] <session_id prefix>}"
+    ROWS=$(Q "SELECT session_id || '|' || COALESCE(cmux_ws,'') FROM sessions
+              WHERE session_id LIKE '$PREFIX%' AND state != 'ENDED';")
+    [ -n "$ROWS" ] || { echo "세션 없음: $PREFIX" >&2; exit 1; }
+    [ "$(printf '%s\n' "$ROWS" | wc -l)" -eq 1 ] || { echo "여러 세션이 맞음 — 앞자리를 더 주세요:" >&2; printf '%s\n' "$ROWS" | cut -c1-8 >&2; exit 1; }
+    sid=${ROWS%%|*} ws=${ROWS#*|}
+    [ -n "$ws" ] || { echo "cmux 탭이 아닌 세션: ${sid:0:8}" >&2; exit 1; }
+    if "$SMON_HOME/hooks/clearok.sh" "$ws" "$OP"; then echo "clearok $OP ${sid:0:8}"
+    else echo "실패: ${sid:0:8} (cmux 밖에서 실행했거나 탭이 없음)" >&2; exit 1; fi
+    ;;
   ack)
     # 초록(완료) 확인하고 끄기: phase=acked + 색 clear
     PREFIX="${2:?usage: smon ack <session_id prefix>}"

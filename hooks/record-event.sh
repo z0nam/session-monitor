@@ -133,6 +133,9 @@ SQL
       UPDATE sessions SET tab_want='$DESIRED'$( [ -n "$FORCE" ] && echo ", tab_color='?'" )
       WHERE session_id='$(sq "$SESSION_ID")';"
   fi
+  # clear 가능 표시(🟢)는 사용자가 그 세션에 다시 입력하면 뗀다. 표시가 없으면 파일 검사 1회뿐.
+  [ "$EVENT" = UserPromptSubmit ] && [ -n "$CUR_WS" ] && [ -f "$SMON_DATA_DIR/clearok/$CUR_WS" ] && \
+    "$SMON_HOME/hooks/clearok.sh" "$CUR_WS" unmark
   # reconcile: 자기 것 우선 + 밀린 것 포함 최대 3건, 건당 3초 상한
   /usr/bin/sqlite3 -separator '|' "$DB" "
     SELECT session_id, COALESCE(tab_want,''), cmux_ws FROM sessions

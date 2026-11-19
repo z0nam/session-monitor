@@ -146,7 +146,13 @@ smon all              # 오늘 활동 전체 (ENDED 포함)
 smon tail <sid앞자리>  # 해당 세션 이벤트 이력
 smon prune            # 7일 지난 ENDED 세션+events 정리
 smon backfill         # pid 없는 옛 세션 ↔ 실행 중 claude 프로세스 매칭 (이행용)
+smon clearok <sid앞자리>        # clear 해도 되는 세션: cmux 탭 이름 앞에 🟢 (사용자가 그 세션에 입력하면 자동 해제)
+smon clearok --undo <sid앞자리> # 🟢 수동 해제
 ```
+
+`clearok` 는 조율 세션이 일꾼 세션을 검토한 뒤 다는 표시다(agent-rules `docs/orchestration.md` §6). 탭 색은 사이드바에서
+눈에 잘 안 띄어 이름 앞 이모지로 한다(2026-11-19). 원래 자동 이름이었으면 해제 때 자동 이름으로 돌아간다.
+cmux 는 cmux 안에서 시작된 프로세스만 받으므로 cmux 탭 안의 세션·셸에서 실행한다.
 
 `backfill` 매칭 순서: ① `ps eww`로 프로세스 env/인자에서 session_id 정확 매칭
 ② 실패 시 세션 cwd에 주인 없는 claude가 있으면 보류(다음 훅 이벤트가 자동 백필)
