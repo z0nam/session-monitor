@@ -42,16 +42,19 @@ case "$OP" in
     ;;
   unmark)
     [ -f "$STATE/$WS" ] || exit 0
-    SAVED=$(cat "$STATE/$WS"); rm -f "$STATE/$WS"
-    I=$(info) || exit 0
+    # 상태 파일은 표시를 실제로 뗐거나 이미 없음을 확인한 뒤에만 지운다 — cmux 가 잠깐 실패해도
+    # 다음 입력·--undo 가 다시 시도하게 (#8 Codex 리뷰).
+    SAVED=$(cat "$STATE/$WS")
+    I=$(info) || exit 1
     TITLE=${I#*$'\t'}
-    case "$TITLE" in "$MARK"*) ;; *) exit 0 ;; esac   # 사용자가 이미 지움
+    case "$TITLE" in "$MARK"*) ;; *) rm -f "$STATE/$WS"; exit 0 ;; esac   # 사용자가 이미 지움
     BARE=${TITLE#"$MARK"}
     if [ "${SAVED%%$'\t'*}" = 0 ] && [ "$BARE" = "${SAVED#*$'\t'}" ]; then
       run "$CMUX" workspace-action --workspace "$WS" --action clear-name >/dev/null
     else
       run "$CMUX" workspace-action --workspace "$WS" --action rename --title "$BARE" >/dev/null
-    fi
+    fi || exit 1
+    rm -f "$STATE/$WS"
     ;;
   *) echo "usage: clearok.sh <workspace> mark|unmark" >&2; exit 2 ;;
 esac
