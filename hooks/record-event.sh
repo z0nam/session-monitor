@@ -157,7 +157,7 @@ SQL
   if [ -n "$CMUX_SURFACE_ID" ]; then
     _ck=("$SMON_DATA_DIR/clearok/"*-* "$SMON_DATA_DIR/clearok/tab/"*)
     if [ -e "${_ck[0]}" ] || [ -e "${_ck[1]}" ]; then
-      _last=0; read -r _last < "$SMON_DATA_DIR/clearok/.reconciled" 2>/dev/null
+      _last=0; { read -r _last < "$SMON_DATA_DIR/clearok/.reconciled"; } 2>/dev/null
       if [ $((NOW - ${_last:-0})) -ge 60 ] 2>/dev/null; then
         echo "$NOW" > "$SMON_DATA_DIR/clearok/.reconciled"
         "$SMON_HOME/hooks/clearok.sh" - reconcile

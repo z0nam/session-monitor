@@ -158,20 +158,32 @@ reconcile_ws() {
     case $rc in
       1) rm -f "$TABS/$t" ;;
       0) case "$TITLE" in "$MARK"*) ;; *) rm -f "$TABS/$t" ;; esac ;;
+      *) return 1 ;;   # cmux 조회 실패 — 기록은 그대로 두고 다음에 (느린 cmux 에 시간을 더 쓰지 않게)
     esac
   done
   if [ -n "$(marked_tabs)" ]; then mark_ws; else unmark_ws; fi
 }
 
 # 표시가 있는 모든 워크스페이스를 맞춘다 — 탭을 닫거나 /clear 해서 그 워크스페이스에 입력이 없어도 정리되게.
+# 훅 시간 한도(10초) 안에 들도록 한 번에 약 3초까지만 하고, 나머지는 다음 차례에 이어서 한다(.cursor 다음부터).
 reconcile_all() {
-  local f seen=" "
+  local f list=() seen=" " cursor start i n w
   for f in "$STATE"/* "$TABS"/*; do
     [ -f "$f" ] || continue
-    case "$f" in "$TABS"/*) WS=$(head -n1 "$f" | cut -f1) ;; *) WS=${f##*/} ;; esac
-    case "$seen" in *" $WS "*) continue ;; esac
-    seen="$seen$WS "
-    reconcile_ws
+    case "$f" in "$TABS"/*) w=$(head -n1 "$f" | cut -f1) ;; *) w=${f##*/} ;; esac
+    case "$seen" in *" $w "*) continue ;; esac
+    seen="$seen$w "; list+=("$w")
+  done
+  n=${#list[@]}; [ "$n" -gt 0 ] || return 0
+  { read -r cursor < "$STATE/.cursor"; } 2>/dev/null
+  start=0
+  for ((i = 0; i < n; i++)); do [ "${list[$i]}" = "$cursor" ] && { start=$(( (i + 1) % n )); break; }; done
+  SECONDS=0
+  for ((i = 0; i < n; i++)); do
+    [ "$i" -gt 0 ] && [ "$SECONDS" -ge 3 ] && break
+    WS=${list[$(( (start + i) % n ))]}
+    reconcile_ws || break      # cmux 가 안 되면 이번 차례는 여기까지
+    echo "$WS" > "$STATE/.cursor"
   done
 }
 
