@@ -1,6 +1,6 @@
 #!/bin/bash
 # clear 해도 되는 세션 표시 — cmux 워크스페이스 이름과 그 세션의 터미널 탭 이름 앞에 🟢 (에이전트 중립).
-# 사용: clearok.sh <workspace> mark|unmark [surface]  ·  clearok.sh <workspace> find <session_id>
+# 사용: clearok.sh <workspace> mark|unmark [surface]  ·  clearok.sh <workspace> find <session_id>  ·  clearok.sh - reconcile
 #   mark   : 워크스페이스 이름과(surface 를 주면) 그 탭 이름 앞에 "🟢 " 를 붙이고 원래 이름을 상태 파일에 적는다.
 #   unmark : surface 의 탭 표시를 떼고, 그 워크스페이스에 표시된 탭이 더 없으면 워크스페이스 표시도 뗀다.
 #            surface 없이 부르면(smon clearok --undo 의 옛 동작) 워크스페이스와 거기 표시된 탭을 모두 뗀다.
@@ -149,13 +149,56 @@ sys.exit(1)' "$ref" && return 0
   return 1
 }
 
+# 워크스페이스 🟢 를 "그 안에 🟢 탭이 하나라도 있으면 있음, 없으면 없음" 으로 맞춘다 (2026-11-24 사용자 확인한 의도).
+# 탭 기록 중 닫혔거나 🟢 가 이미 지워진 것(사용자가 이름을 고침 등)은 치운다. 조회 실패(2)는 기록을 남긴다.
+reconcile_ws() {
+  local t TITLE rc
+  for t in $(marked_tabs); do
+    TITLE=$(tab_title "$t"); rc=$?
+    case $rc in
+      1) rm -f "$TABS/$t" ;;
+      0) case "$TITLE" in "$MARK"*) ;; *) rm -f "$TABS/$t" ;; esac ;;
+      *) return 1 ;;   # cmux 조회 실패 — 기록은 그대로 두고 다음에 (느린 cmux 에 시간을 더 쓰지 않게)
+    esac
+  done
+  if [ -n "$(marked_tabs)" ]; then mark_ws; else unmark_ws; fi
+}
+
+# 표시가 있는 모든 워크스페이스를 맞춘다 — 탭을 닫거나 /clear 해서 그 워크스페이스에 입력이 없어도 정리되게.
+# 훅 시간 한도(10초) 안에 들도록 한 번에 약 3초까지만 하고, 나머지는 다음 차례에 이어서 한다(.cursor 다음부터).
+reconcile_all() {
+  local f list=() seen=" " cursor start i n w
+  for f in "$STATE"/* "$TABS"/*; do
+    [ -f "$f" ] || continue
+    case "$f" in "$TABS"/*) w=$(head -n1 "$f" | cut -f1) ;; *) w=${f##*/} ;; esac
+    case "$seen" in *" $w "*) continue ;; esac
+    seen="$seen$w "; list+=("$w")
+  done
+  n=${#list[@]}; [ "$n" -gt 0 ] || return 0
+  { read -r cursor < "$STATE/.cursor"; } 2>/dev/null
+  start=0
+  for ((i = 0; i < n; i++)); do [ "${list[$i]}" = "$cursor" ] && { start=$(( (i + 1) % n )); break; }; done
+  SECONDS=0
+  for ((i = 0; i < n; i++)); do
+    [ "$i" -gt 0 ] && [ "$SECONDS" -ge 3 ] && break
+    WS=${list[$(( (start + i) % n ))]}
+    reconcile_ws || break      # cmux 가 안 되면 이번 차례는 여기까지
+    echo "$WS" > "$STATE/.cursor"
+  done
+}
+
 case "$OP" in
   find)
     find_surface "$SURF"
     ;;
   mark)
+    # 탭을 모르면 표시하지 않는다 — 워크스페이스에만 달면 "🟢 탭이 있을 때만" 규칙과 어긋난다.
+    [ -n "$SURF" ] || { echo "탭(surface)을 찾지 못함" >&2; exit 1; }
+    mark_tab "$SURF" || exit 1
     mark_ws || exit 1
-    [ -z "$SURF" ] || mark_tab "$SURF" || exit 1
+    ;;
+  reconcile)
+    reconcile_all
     ;;
   unmark)
     if [ -n "$SURF" ]; then
@@ -163,9 +206,7 @@ case "$OP" in
     else
       for t in $(marked_tabs); do unmark_tab "$t" || exit 1; done
     fi
-    # 닫힌 탭의 기록은 먼저 치운다 — 안 그러면 표시된 탭이 없는데도 워크스페이스 🟢 가 남는다 (#9 Codex 리뷰)
-    for t in $(marked_tabs); do tab_title "$t" >/dev/null; [ $? = 1 ] && rm -f "$TABS/$t"; done
-    [ -n "$(marked_tabs)" ] || unmark_ws || exit 1    # 다른 탭이 아직 표시돼 있으면 워크스페이스 표시는 둔다
+    reconcile_ws || exit 1    # 다른 🟢 탭이 남아 있으면 워크스페이스 표시는 두고, 없으면 뗀다
     ;;
-  *) echo "usage: clearok.sh <workspace> mark|unmark [surface] | find <session_id>" >&2; exit 2 ;;
+  *) echo "usage: clearok.sh <workspace> mark|unmark [surface] | find <session_id> | - reconcile" >&2; exit 2 ;;
 esac
