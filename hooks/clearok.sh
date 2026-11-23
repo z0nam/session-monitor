@@ -40,21 +40,29 @@ sys.exit(1)' "$WS" && return 0
   return 1
 }
 
-# 워크스페이스 안에서 탭(surface)의 현재 이름 출력. 없으면 실패.
-tab_title() {
-  local panes p
+# 워크스페이스의 모든 탭을 "UUID<TAB>이름" 으로 출력. cmux 조회가 하나라도 실패하면 실패.
+ws_surfaces() {
+  local panes p out
   panes=$(run "$CMUX" list-panes --workspace "$WS" --json 2>/dev/null | /usr/bin/python3 -c \
     'import sys,json; [print(p["id"]) for p in json.load(sys.stdin).get("panes", [])]' 2>/dev/null) || return 1
+  [ -n "$panes" ] || return 1
   for p in $panes; do
-    run "$CMUX" list-pane-surfaces --workspace "$WS" --pane "$p" --json 2>/dev/null | /usr/bin/python3 -c '
+    out=$(run "$CMUX" list-pane-surfaces --workspace "$WS" --pane "$p" --json 2>/dev/null | /usr/bin/python3 -c '
 import sys, json
-s = sys.argv[1].upper()
 for x in json.load(sys.stdin).get("surfaces", []):
-    if x.get("id", "").upper() == s:
-        print(x.get("title") or "")
-        sys.exit(0)
-sys.exit(1)' "$1" && return 0
+    print((x.get("id") or "").upper() + "\t" + (x.get("title") or ""))') || return 1
+    printf '%s\n' "$out"
   done
+}
+
+# 탭의 현재 이름 출력. 0 = 찾음 · 1 = 조회는 됐고 그 탭이 없음(닫힘) · 2 = 조회 실패(다음에 다시)
+tab_title() {
+  local all line S
+  S=$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')
+  all=$(ws_surfaces) || return 2
+  while IFS= read -r line; do
+    [ "${line%%$'\t'*}" = "$S" ] && { printf '%s\n' "${line#*$'\t'}"; return 0; }
+  done <<< "$all"
   return 1
 }
 
@@ -103,11 +111,10 @@ mark_tab() {
 unmark_tab() {
   local S="$1" TITLE BARE
   [ -f "$TABS/$S" ] || return 0
-  if ! TITLE=$(tab_title "$S"); then
-    # 탭이 닫혔으면 뗄 것이 없다. cmux 자체가 안 되면(창 목록도 실패) 다음에 다시.
-    ws_info >/dev/null || return 1
-    rm -f "$TABS/$S"; return 0
-  fi
+  TITLE=$(tab_title "$S"); case $? in
+    1) rm -f "$TABS/$S"; return 0 ;;   # 탭이 닫혔음을 확인 — 뗄 것이 없다
+    2) return 1 ;;                     # 조회 실패 — 상태를 남겨 다음 입력·--undo 가 다시 시도 (#9 Codex 리뷰)
+  esac
   case "$TITLE" in "$MARK"*) ;; *) rm -f "$TABS/$S"; return 0 ;; esac
   BARE=${TITLE#"$MARK"}
   # 탭에는 "사용자가 지은 이름" 플래그가 없다 → 일단 자동 이름으로 돌리고, 원래 이름과 다르면 rename.
@@ -156,6 +163,8 @@ case "$OP" in
     else
       for t in $(marked_tabs); do unmark_tab "$t" || exit 1; done
     fi
+    # 닫힌 탭의 기록은 먼저 치운다 — 안 그러면 표시된 탭이 없는데도 워크스페이스 🟢 가 남는다 (#9 Codex 리뷰)
+    for t in $(marked_tabs); do tab_title "$t" >/dev/null; [ $? = 1 ] && rm -f "$TABS/$t"; done
     [ -n "$(marked_tabs)" ] || unmark_ws || exit 1    # 다른 탭이 아직 표시돼 있으면 워크스페이스 표시는 둔다
     ;;
   *) echo "usage: clearok.sh <workspace> mark|unmark [surface] | find <session_id>" >&2; exit 2 ;;
