@@ -143,12 +143,25 @@ SQL
     esac
   fi
   # clear 가능 표시(🟢)는 사용자가 그 세션에 다시 입력하면 뗀다. 표시가 없으면 파일 검사뿐.
-  if [ "$EVENT" = UserPromptSubmit ] && [ -n "$CUR_WS" ]; then
+  # SessionEnd 도 포함: /clear·종료한 세션의 탭 🟢 를 뗀다(그 탭에 다음 입력이 안 올 수 있다).
+  if { [ "$EVENT" = UserPromptSubmit ] || [ "$EVENT" = SessionEnd ]; } && [ -n "$CUR_WS" ]; then
     # 내 탭이 표시돼 있거나 워크스페이스가 표시돼 있을 때만 부른다. 같은 워크스페이스의 다른 탭이
     # 아직 표시돼 있으면 clearok.sh 가 워크스페이스 표시는 남긴다.
     if { [ -n "$CMUX_SURFACE_ID" ] && [ -f "$SMON_DATA_DIR/clearok/tab/$CMUX_SURFACE_ID" ]; } || \
        [ -f "$SMON_DATA_DIR/clearok/$CUR_WS" ]; then
       "$SMON_HOME/hooks/clearok.sh" "$CUR_WS" unmark ${CMUX_SURFACE_ID:-}
+    fi
+  fi
+  # 표시가 하나라도 있으면 60초에 한 번 전체를 맞춘다 — 🟢 탭을 닫아 그 워크스페이스에 입력이 없어도
+  # 워크스페이스 🟢 가 남지 않게. cmux 는 cmux 안 프로세스만 받으므로 cmux 세션의 훅에서만. 표시가 없으면 glob 1회뿐.
+  if [ -n "$CMUX_SURFACE_ID" ]; then
+    _ck=("$SMON_DATA_DIR/clearok/"*-* "$SMON_DATA_DIR/clearok/tab/"*)
+    if [ -e "${_ck[0]}" ] || [ -e "${_ck[1]}" ]; then
+      _last=0; read -r _last < "$SMON_DATA_DIR/clearok/.reconciled" 2>/dev/null
+      if [ $((NOW - ${_last:-0})) -ge 60 ] 2>/dev/null; then
+        echo "$NOW" > "$SMON_DATA_DIR/clearok/.reconciled"
+        "$SMON_HOME/hooks/clearok.sh" - reconcile
+      fi
     fi
   fi
   # reconcile: 자기 것 우선 + 밀린 것 포함 최대 3건, 건당 3초 상한
