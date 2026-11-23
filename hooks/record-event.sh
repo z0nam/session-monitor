@@ -133,9 +133,24 @@ SQL
       UPDATE sessions SET tab_want='$DESIRED'$( [ -n "$FORCE" ] && echo ", tab_color='?'" )
       WHERE session_id='$(sq "$SESSION_ID")';"
   fi
-  # clear 가능 표시(🟢)는 사용자가 그 세션에 다시 입력하면 뗀다. 표시가 없으면 파일 검사 1회뿐.
-  [ "$EVENT" = UserPromptSubmit ] && [ -n "$CUR_WS" ] && [ -f "$SMON_DATA_DIR/clearok/$CUR_WS" ] && \
-    "$SMON_HOME/hooks/clearok.sh" "$CUR_WS" unmark
+  # 세션 → cmux 탭(surface) 대응. smon clearok 가 그 세션의 탭에 🟢 를 달 때 쓴다.
+  # 새 세션·resume(SessionStart) 또는 파일이 없을 때만 쓴다 → 평소 fork 0.
+  if [ -n "$CMUX_SURFACE_ID" ]; then
+    SF="$SMON_DATA_DIR/surface/$SESSION_ID"
+    case "$SESSION_ID" in */*|'') ;; *)
+      { [ "$EVENT" = SessionStart ] || [ ! -f "$SF" ]; } && \
+        { [ -d "${SF%/*}" ] || mkdir -p "${SF%/*}"; } && printf '%s' "$CMUX_SURFACE_ID" > "$SF" ;;
+    esac
+  fi
+  # clear 가능 표시(🟢)는 사용자가 그 세션에 다시 입력하면 뗀다. 표시가 없으면 파일 검사뿐.
+  if [ "$EVENT" = UserPromptSubmit ] && [ -n "$CUR_WS" ]; then
+    # 내 탭이 표시돼 있거나 워크스페이스가 표시돼 있을 때만 부른다. 같은 워크스페이스의 다른 탭이
+    # 아직 표시돼 있으면 clearok.sh 가 워크스페이스 표시는 남긴다.
+    if { [ -n "$CMUX_SURFACE_ID" ] && [ -f "$SMON_DATA_DIR/clearok/tab/$CMUX_SURFACE_ID" ]; } || \
+       [ -f "$SMON_DATA_DIR/clearok/$CUR_WS" ]; then
+      "$SMON_HOME/hooks/clearok.sh" "$CUR_WS" unmark ${CMUX_SURFACE_ID:-}
+    fi
+  fi
   # reconcile: 자기 것 우선 + 밀린 것 포함 최대 3건, 건당 3초 상한
   /usr/bin/sqlite3 -separator '|' "$DB" "
     SELECT session_id, COALESCE(tab_want,''), cmux_ws FROM sessions

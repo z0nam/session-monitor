@@ -320,7 +320,10 @@ case "${1:-}" in
     [ "$(printf '%s\n' "$ROWS" | wc -l)" -eq 1 ] || { echo "여러 세션이 맞음 — 앞자리를 더 주세요:" >&2; printf '%s\n' "$ROWS" | cut -c1-8 >&2; exit 1; }
     sid=${ROWS%%|*} ws=${ROWS#*|}
     [ -n "$ws" ] || { echo "cmux 탭이 아닌 세션: ${sid:0:8}" >&2; exit 1; }
-    if "$SMON_HOME/hooks/clearok.sh" "$ws" "$OP"; then echo "clearok $OP ${sid:0:8}"
+    # 그 세션의 탭: 훅이 적어 둔 대응 → 없으면 cmux 의 resume 정보로 찾기 → 그래도 없으면 워크스페이스만
+    surf=$(cat "$SMON_DATA_DIR/surface/$sid" 2>/dev/null || true)
+    [ -n "$surf" ] || surf=$("$SMON_HOME/hooks/clearok.sh" "$ws" find "$sid" 2>/dev/null || true)
+    if "$SMON_HOME/hooks/clearok.sh" "$ws" "$OP" $surf; then echo "clearok $OP ${sid:0:8}${surf:+ (탭 포함)}"
     else echo "실패: ${sid:0:8} (cmux 밖에서 실행했거나 탭이 없음)" >&2; exit 1; fi
     ;;
   ack)
