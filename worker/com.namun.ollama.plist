@@ -11,6 +11,10 @@
   </array>
   <key>EnvironmentVariables</key>
   <dict>
+    <key>OLLAMA_CONTEXT_LENGTH</key>
+    <string>32768</string>
+    <key>OLLAMA_MAX_LOADED_MODELS</key>
+    <string>2</string>
     <key>OLLAMA_MODELS</key>
     <string>/Volumes/Dev_1T/ollama-models</string>
     <key>OLLAMA_FLASH_ATTENTION</key>

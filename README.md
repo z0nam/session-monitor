@@ -183,11 +183,14 @@ lsof의 한글 경로는 NFD라 그냥 비교하면 산 세션을 죽은 것으�
   로그: `~/Library/Logs/smon-worker.log`
 - **모델 교체(탐색용)**: `smon model` 조회, `smon model <이름>` 교체 — config 테이블에
   저장되고 다음 패스부터 적용. 어떤 모델이 만든 요약인지 `sessions.summary_model`에 남음.
-  후보: `qwen3:30b-a3b`(MoE, 기본), `glm-4.7-flash`, `qwen3:8b`, `exaone3.5:7.8b`.
+  기본은 `glm-4.7-flash`. 2026-11-24 비교 측정(z0nam/llm-playground #1)에서 15건 모두 두 줄 형식·PHASE를 지켰고 건당 중앙값 3.0s.
+  `qwen3:30b-a3b`는 Ollama 0.40.17에서 think:false여도 영어 추론문이 본문에 섞여 200토큰 안에 PHASE 줄까지 못 감(0/15) → 쓰지 말 것.
+  `qwen3.8:27b`는 PHASE는 지키지만 건당 약 11s.
 - Ollama가 죽어 있으면 이벤트를 미처리로 남기고 종료 → 다음 패스에 재시도.
 - **모델 저장소는 외장 Dev_1T** (`OLLAMA_MODELS=/Volumes/Dev_1T/ollama-models`) —
   내장 디스크 여유 부족(~31GB). 서비스는 brew 대신 `worker/com.namun.ollama.plist`
-  (env 포함, `~/Library/LaunchAgents/`에 복사). **주의(TCC)**: launchd로 뜬 ollama가
+  (env 포함, `~/Library/LaunchAgents/`에 복사). `OLLAMA_CONTEXT_LENGTH=32768`은 num_ctx를 안 넘기는 클라이언트(`/v1` 등)가
+  모델 기본값(262144)으로 띄워 메모리를 수십 GB 잡는 것을 막고, `OLLAMA_MAX_LOADED_MODELS=2`는 LLM 1개 + 임베딩(bge-m3)만 상주시키려는 것(2026-11-24). **주의(TCC)**: launchd로 뜬 ollama가
   이동식 볼륨을 열 때 macOS 권한이 없으면 open()에서 무한 대기(리슨은 하는데 응답 없음).
   → 시스템 설정 › 개인정보 보호 및 보안 › 전체 디스크 접근에
   `/opt/homebrew/opt/ollama/bin/ollama`(libexec 실제 바이너리) 추가 후 에이전트 재로드.
