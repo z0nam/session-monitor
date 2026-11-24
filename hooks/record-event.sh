@@ -144,7 +144,10 @@ SQL
   fi
   # clear 가능 표시(🟢)는 사용자가 그 세션에 다시 입력하면 뗀다. 표시가 없으면 파일 검사뿐.
   # SessionEnd 도 포함: /clear·종료한 세션의 탭 🟢 를 뗀다(그 탭에 다음 입력이 안 올 수 있다).
-  if { [ "$EVENT" = UserPromptSubmit ] || [ "$EVENT" = SessionEnd ]; } && [ -n "$CUR_WS" ]; then
+  # /clear 는 SessionStart(source=clear)로도 뗀다 — Claude Code 는 SessionEnd 훅을 짧게(약 1.5초) 끊어
+  # 거기서 떼다 잘리면 🟢 가 다음 입력까지 남았다(2026-11-24 사용자 보고).
+  _CLR=; [ "$EVENT" = SessionStart ] && case "$PAYLOAD" in *'"source":"clear"'*) _CLR=1 ;; esac
+  if { [ "$EVENT" = UserPromptSubmit ] || [ "$EVENT" = SessionEnd ] || [ -n "$_CLR" ]; } && [ -n "$CUR_WS" ]; then
     # 내 탭이 표시돼 있거나 워크스페이스가 표시돼 있을 때만 부른다. 같은 워크스페이스의 다른 탭이
     # 아직 표시돼 있으면 clearok.sh 가 워크스페이스 표시는 남긴다.
     if { [ -n "$CMUX_SURFACE_ID" ] && [ -f "$SMON_DATA_DIR/clearok/tab/$CMUX_SURFACE_ID" ]; } || \
