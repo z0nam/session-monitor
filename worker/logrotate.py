@@ -30,6 +30,12 @@ def targets(smon_home):
         os.path.join(logs, "ollama.log"),           # com.namun.ollama (KeepAlive 데몬)
         os.path.join(logs, "smon-worker.log"),      # com.namun.smon-worker (이 워커 자신)
         os.path.join(logs, "smon-pull.log"),        # com.namun.smon-pull
+        # RC 데몬(claude-session-sync/bin/claude-remote). 런처 쪽 감시 프로세스(claude-session-sync#8)는
+        # 데몬 재시작 후에만 붙는데 studio 는 재부팅이 드물다 → 여기서 하루 1회 안전망. 겹쳐도 무해.
+        os.path.join(logs, "claude-remote.out.log"),      # com.anthropic.claude-remote (회사 계정)
+        os.path.join(logs, "claude-remote.err.log"),
+        os.path.join(logs, "claude-remote-prv.out.log"),  # com.namun.claude-remote-prv (개인 계정)
+        os.path.join(logs, "claude-remote-prv.err.log"),
         os.path.join(data, "apply-color.log"),      # hooks/apply-color.sh (DB 이전 후 위치)
         os.path.join(smon_home, "apply-color.log"),  # hooks/apply-color.sh (레거시 위치)
         os.path.join(smon_home, "report", "logs", "launchd.err"),  # com.namun.smon-report

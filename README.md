@@ -182,7 +182,7 @@ lsof의 한글 경로는 NFD라 그냥 비교하면 산 세션을 죽은 것으�
   등록: `cp worker/com.namun.smon-worker.plist ~/Library/LaunchAgents/ && launchctl load ...`
   로그: `~/Library/Logs/smon-worker.log`
 - 로그 순환: 워커가 하루 1회 `worker/logrotate.py` 를 부른다(비치명, 별도 launchd 잡 없음).
-  `ollama.log`·`smon-worker.log`·`smon-pull.log`·`apply-color.log`·`report/logs/launchd.err` 가
+  `ollama.log`·`smon-worker.log`·`smon-pull.log`·`claude-remote*.log`(RC 데몬 안전망)·`apply-color.log`·`report/logs/launchd.err` 가
   10MB(`MAX_BYTES`)를 넘으면 꼬리를 `<로그>.1` 로 복사하고 원본을 제자리에서 자른다(copytruncate).
   launchd 가 O_APPEND 로 열기 때문에 데몬이 계속 같은 파일에 이어 쓴다. `report/logs/*.log` 는 90일 보존.
   수동 즉시 실행: `python3 worker/logrotate.py`. 테스트: `python3 tests/test_logrotate.py`.
