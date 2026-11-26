@@ -5,6 +5,8 @@ __pycache__/
 # 런타임 로그
 report/logs/
 apply-color.log
+apply-color.log.1
+logrotate.stamp
 
 # 로컬 스크래치·무관 하위도구 (공개 레포에 미포함)
 .tmp/
