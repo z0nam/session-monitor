@@ -387,6 +387,17 @@ def summarize_pass(db):
     log(f"{model}: {done}/{len(rows)} sessions summarized")
 
 
+def _logrotate():
+    """하루 1회 로그 크기 점검(worker/logrotate.py). 어떤 실패도 워커를 멈추지 않는다."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+        import logrotate
+        stamp = os.path.join(os.path.dirname(os.path.abspath(DB)), "logrotate.stamp")
+        logrotate.run(SMON_HOME, stamp, log=log)
+    except Exception as e:
+        log(f"logrotate failed: {e}")
+
+
 def main():
     global OLLAMA
     db = sqlite3.connect(DB, timeout=5)
@@ -401,6 +412,7 @@ def main():
         summarize_pass(db)
     finally:
         notify_pass(db)          # 요약 실패(Ollama 다운)여도 알림은 나가야 한다
+        _logrotate()             # 하루 1회 로그 순환. 비치명
 
 
 if __name__ == "__main__":
