@@ -377,7 +377,16 @@ def summarize_pass(db):
         GROUP BY e.session_id""").fetchall()
     if not rows:
         return
+    try:
+        _summarize_rows(db, model, rows)
+    finally:
+        if _paused(db):
+            # 진행 중이던 콜이 pause 직후 모델을 다시 올렸을 수 있다 — 어떤 경로로 끝나든 한 번 더 내린다
+            import pause
+            pause.unload_model(db)
 
+
+def _summarize_rows(db, model, rows):
     done = 0
     for sid, max_id, state, transcript in rows:
         if _paused(db):          # 패스 도중 smon pause — 남은 세션은 모델을 다시 올리지 않는다
@@ -404,10 +413,6 @@ def summarize_pass(db):
                    (sid, max_id))
         db.commit()
     log(f"{model}: {done}/{len(rows)} sessions summarized")
-    if _paused(db):
-        # 마지막 콜이 pause 직후 모델을 다시 올렸을 수 있다 — 한 번 더 내린다
-        import pause
-        pause.unload_model(db)
 
 
 def _logrotate():

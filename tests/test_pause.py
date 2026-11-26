@@ -229,5 +229,25 @@ class MidPass(Base):
         self.assertEqual([c[1].get("keep_alive") for c in FakeOllama.calls], [0])  # 마지막에 다시 언로드
 
 
+    def test_pause_during_failed_first_call_still_unloads(self):
+        import summarize
+        now = int(time.time())
+        self.db.execute("INSERT INTO sessions (session_id, state, last_event_at) VALUES ('s1','WAITING_INPUT',?)", (now,))
+        self.db.execute("INSERT INTO events (session_id, event_type, payload_json, created_at, processed)"
+                        " VALUES ('s1','Stop','{\"transcript_path\":\"/x\"}',?,0)", (now,))
+        self.db.commit()
+
+        def fake_summarize(model, excerpt):
+            pause.set_until(self.db, now + 600)   # 첫 콜 도중 정지 + 콜은 타임아웃(실패)
+            return None, ""
+        orig = (summarize.transcript_excerpt, summarize.summarize)
+        summarize.transcript_excerpt, summarize.summarize = (lambda p: "x"), fake_summarize
+        try:
+            summarize.summarize_pass(self.db)
+        finally:
+            summarize.transcript_excerpt, summarize.summarize = orig
+        self.assertEqual([c[1].get("keep_alive") for c in FakeOllama.calls], [0])
+
+
 if __name__ == "__main__":
     unittest.main()
