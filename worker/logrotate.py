@@ -51,17 +51,27 @@ def copytruncate(path, max_bytes=MAX_BYTES):
     if size <= max_bytes:
         return False
     tmp = path + ".1.tmp"
-    with open(path, "rb") as src, open(tmp, "wb") as dst:
-        src.seek(size - max_bytes)
-        src.readline()                   # 잘린 첫 줄은 버린다(줄 경계에서 시작)
-        while True:
-            buf = src.read(1 << 20)
-            if not buf:
-                break
-            dst.write(buf)
-        # 복사 시작 뒤에 붙은 내용까지 담고 바로 자른다 — 틈을 최소화
-        with open(path, "r+b") as f:
-            f.truncate(0)
+    try:
+        # 복사(복사 중 붙은 내용 포함)를 flush·fsync·close 로 확정한 뒤에야 원본을 자른다.
+        # 복사가 실패하면(디스크 가득 등) 원본은 그대로 남는다.
+        with open(path, "rb") as src, open(tmp, "wb") as dst:
+            src.seek(size - max_bytes)
+            src.readline()               # 잘린 첫 줄은 버린다(줄 경계에서 시작)
+            while True:
+                buf = src.read(1 << 20)
+                if not buf:
+                    break
+                dst.write(buf)
+            dst.flush()
+            os.fsync(dst.fileno())
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+    with open(path, "r+b") as f:         # 확정 직후 바로 자른다 — 틈을 최소화
+        f.truncate(0)
     os.replace(tmp, path + ".1")
     return True
 

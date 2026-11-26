@@ -48,6 +48,23 @@ class CopyTruncate(unittest.TestCase):
         self.assertEqual(read(self.log), before)
         self.assertFalse(os.path.exists(self.log + ".1"))
 
+    def test_copy_failure_keeps_source(self):
+        # 아카이브 쓰기가 실패하면(디스크 가득 등) 원본을 자르지 않고 tmp 도 남기지 않는다
+        write_lines(self.log, 300)
+        before = read(self.log)
+        real_fsync = logrotate.os.fsync
+
+        def boom(fd):
+            raise OSError(28, "No space left on device")
+        logrotate.os.fsync = boom
+        try:
+            with self.assertRaises(OSError):
+                logrotate.copytruncate(self.log, max_bytes=10_000)
+        finally:
+            logrotate.os.fsync = real_fsync
+        self.assertEqual(read(self.log), before)
+        self.assertEqual(sorted(os.listdir(self.d.name)), ["a.log"])
+
     def test_missing_file(self):
         self.assertFalse(logrotate.copytruncate(os.path.join(self.d.name, "none.log")))
 
