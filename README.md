@@ -66,6 +66,8 @@ deploy/                 # launchd 템플릿, migrate-to-run.sh / rollback-run.sh
 - **개발**: `~/dev/session-monitor` — 브랜치·PR 작업만 한다. 훅·launchd 는 여기를 가리키지 않는다.
 - **실행**: `~/dev/session-monitor-run` — `git clone` 한 main 추적 체크아웃. 훅·launchd·`~/.local/bin/smon`·
   스킬 심링크가 전부 여기를 가리킨다. 직접 고치지 않는다.
+- **현황(2026-11-26): studio 는 아직 전환 전이다.** `-run` 이 없고 launchd·훅이 `~/dev/session-monitor` 를 직접 실행한다.
+  전환 전까지 studio 배포는 그 체크아웃을 main 으로 두는 것(브랜치 작업은 worktree 에서)이다.
 - **배포 = PR 머지 후 `git -C ~/dev/session-monitor-run pull --ff-only`.** 그게 전부다
   (훅 스크립트는 다음 이벤트부터 새 코드로 돈다. 설정 경로는 그대로라 재등록 불필요).
 
@@ -223,8 +225,12 @@ lsof의 한글 경로는 NFD라 그냥 비교하면 산 세션을 죽은 것으�
 각 머신은 독립적으로 수집(훅→로컬 SQLite, 로컬 reap)하고, **허브가 Tailscale ssh로
 스냅샷을 끌어와** 보드에 합친다 (MACHINE 열). 훅은 네트워크를 절대 타지 않는다.
 
-- 스포크 설치: repo를 `~/dev/session-monitor`로 복사 후 `./install.sh`
+- 스포크 설치: `git clone https://github.com/z0nam/session-monitor.git ~/dev/session-monitor` 후 `./install.sh`
+  (복사본 말고 git 체크아웃으로 — 그래야 아래 한 줄로 배포된다).
   (스키마+smon+Claude 훅+codex/agy 어댑터 멱등 등록. codex는 머신마다 `/hooks` 승인 필요.)
+- **스포크 배포**: 허브에서 `for h in mac-mini mbp; do ssh $h 'git -C ~/dev/session-monitor pull --ff-only'; done`.
+  스포크는 DB 를 레포 안 `sessions.db`(gitignore)에 두므로 pull 이 DB 를 건드리지 않는다.
+  2026-11-26 에 mac-mini·mbp 를 7월 복사본에서 git 체크아웃으로 바꿨다(옛 사본은 `~/dev/session-monitor.bak-20261126`).
 - 허브: config `remote_hosts`('mac-mini mbp')를 두고 `smon pull`이 각 머신의
   `smon export`(JSON; export 전에 그 머신에서 reap)를 받아 `remote_sessions`를
   머신 단위로 교체. 자동화는 `worker/com.namun.smon-pull.plist`(120초).
@@ -232,7 +238,9 @@ lsof의 한글 경로는 NFD라 그냥 비교하면 산 세션을 죽은 것으�
 - **원격 요약**: 허브 Ollama를 `tailscale serve --bg --tcp 11434 tcp://localhost:11434`로
   tailnet 전용 노출(LAN 비노출, Ollama는 localhost 바인딩 유지). 스포크 워커는 config
   `ollama_url`(`http://100.123.230.95:11434`)로 허브 모델을 호출해 자기 세션을 요약.
-- **headless 스포크(mac-mini)**: 콘솔 로그인이 없으면 LaunchAgent가 안 돌아 **cron**으로
+- **headless 스포크(mac-mini)**: 워커는 **cron 하나만** 쓴다. LaunchAgent 는 2026-11-26 에
+  `com.namun.smon-worker.plist.disabled-20261126` 으로 꺼 두었다 — 콘솔 로그인이 있을 때 cron 과 둘 다 돌아
+  2분마다 워커가 두 번 돌던 중복을 없앤 것. 콘솔 로그인이 없으면 LaunchAgent가 안 돌아 **cron**으로
   워커 실행 (`*/2 * * * * python3 …/worker/summarize.py # smon-worker`). 잠들면 수집·pull이
   멈출 뿐 데이터는 안전 (허브는 마지막 스냅샷 유지).
 - **Windows 스포크(winspoke/)**: bash 대신 `winspoke/record_event.py`(stdlib only;
