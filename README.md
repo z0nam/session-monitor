@@ -240,6 +240,10 @@ lsof의 한글 경로는 NFD라 그냥 비교하면 산 세션을 죽은 것으�
   설치: repo를 `%USERPROFILE%\dev\session-monitor`로 복사 → `install.ps1` 실행 →
   codex는 TUI `/hooks` 승인. 허브 config `remote_hosts_win`에 호스트 추가하면
   `smon pull`이 cmd/PowerShell 문법 폴백으로 export를 끌어온다.
+- **요약 일시정지**: `smon pause [3h|90m]`(기본 2h)·`smon resume`. 상태는 config `pause_until`(epoch).
+  워커는 요약만 건너뛰고(알림·reap·로그 순환은 계속) 모델은 `keep_alive:0` 으로 내린다.
+  허브의 `smon pull` 이 `smon export --pause-until <epoch>` 로 원격에 같은 값을 실어 보내므로
+  스포크도 허브를 따른다(옛 스포크는 인자를 무시 — 호환). 로직은 `worker/pause.py`.
 - 한계(v1): 알림은 각 머신 로컬 화면만. Windows엔 워커 없음(요약·agy_sync 미지원).
   NATIVE_MAP은 agent-event.sh와 record_event.py 두 곳 — 수정 시 함께 (SSOT 후보:
   bash 구현을 Python으로 통일하는 것, 퍼블릭 릴리스 때).

@@ -346,7 +346,23 @@ def notify_pass(db):
     log(f"notified {len(fresh)} session(s) via {method}")
 
 
+def _paused(db):
+    """smon pause 상태면 만료 epoch, 아니면 0 (worker/pause.py). 판정 실패는 '정지 아님'."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+        import pause
+        return pause.paused_until(db)
+    except Exception as e:
+        log(f"pause check failed: {e}")
+        return 0
+
+
 def summarize_pass(db):
+    until = _paused(db)
+    if until:
+        # 이벤트는 processed=0 으로 남겨 둔다 — 재개 후 첫 패스가 한꺼번에 요약
+        log(f"summarize paused until {time.strftime('%F %T', time.localtime(until))}")
+        return
     model = (db.execute("SELECT value FROM config WHERE key='model'").fetchone()
              or [DEFAULT_MODEL])[0]
 
@@ -364,6 +380,9 @@ def summarize_pass(db):
 
     done = 0
     for sid, max_id, state, transcript in rows:
+        if _paused(db):          # 패스 도중 smon pause — 남은 세션은 모델을 다시 올리지 않는다
+            log("paused mid-pass; leaving remaining events unprocessed")
+            break
         summary, phase = None, ""
         if state != "ENDED" and transcript:
             excerpt = transcript_excerpt(transcript)
@@ -385,6 +404,10 @@ def summarize_pass(db):
                    (sid, max_id))
         db.commit()
     log(f"{model}: {done}/{len(rows)} sessions summarized")
+    if _paused(db):
+        # 마지막 콜이 pause 직후 모델을 다시 올렸을 수 있다 — 한 번 더 내린다
+        import pause
+        pause.unload_model(db)
 
 
 def _logrotate():

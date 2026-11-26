@@ -25,6 +25,8 @@ smon tail <sid앞자리>  # 해당 세션 이벤트 이력
 smon done [sid]       # 명시적 완료 사인 (→초록). 인자 없으면 자기 세션 자동 특정
 smon dir [sid]        # 일단락·지침 대기 사인 (→파랑)
 smon ack <sid앞자리>   # 초록 확인하고 끄기
+smon pause [기간]      # 요약 일시정지 (기본 2h; 3h·90m·1h30m). 모델을 Ollama에서 즉시 내림, 만료 시 자동 재개
+smon resume           # 요약 바로 재개
 smon model [이름]      # 요약 모델 조회/교체 (ollama 모델명)
 smon work             # 요약 워커 즉시 1패스
 smon repaint          # cmux 재시작/업그레이드로 탭 색 날아갔을 때 전량 재적용
@@ -48,8 +50,22 @@ smon prune            # 7일 지난 ENDED 정리
 - state 뒤 `?` = 소유 프로세스 미확정(생존 판정 불가). 거슬리면 `smon backfill`.
 - SUMMARY는 2분 주기라 방금 활동은 비어 있거나 한 박자 늦을 수 있음.
 
+## 요약 일시정지 (pause / resume)
+
+사용자가 LLM 시뮬레이션 등으로 studio Ollama 를 잠깐 비워야 할 때 쓴다.
+"3시간 멈춰", "요약 좀 꺼 둬", "ollama 비워 줘" → `smon pause 3h`. "다시 켜", "재개" → `smon resume`.
+
+- 기간: `3h`, `90m`, `1h30m`, 숫자만 쓰면 분. 생략하면 2h. 만료 시각이 지나면 자동 재개된다.
+- `smon pause` 는 요약 모델(`smon model`)을 `keep_alive:0` 으로 즉시 메모리에서 내린다.
+  **Ollama 서비스는 내리지 않는다** — 시뮬레이션이 같은 Ollama 를 쓸 수 있다.
+- 멈추는 것은 요약뿐이다. 알림·reap·탭 색칠·아침 리포트·로그 순환은 그대로 돈다.
+  멈춘 동안 쌓인 이벤트는 재개 후 첫 패스에서 한꺼번에 요약된다.
+- 보드 맨 위에 `⏸  요약 일시정지 중(~HH:MM까지)` 이 뜬다.
+- studio(허브)에서 걸면 원격 워커(mac-mini·mbp)도 따른다 — 즉시 `smon pull` 로 전파하고,
+  놓쳐도 2분 주기 pull 이 맞춘다. 원격 상태의 기준은 허브다(원격에서 따로 건 pause 는 다음 pull 에 허브 값으로 덮인다).
+
 ## 주의
 
-- 읽기는 자유. `prune`/`model` 등 상태를 바꾸는 명령은 사용자가 원할 때만.
+- 읽기는 자유. `prune`/`model`/`pause` 등 상태를 바꾸는 명령은 사용자가 원할 때만.
 - SUMMARY 생성엔 로컬 Ollama(launchd `com.namun.ollama`, 모델은 외장 Dev_1T)가
   필요 — 요약이 계속 빈다면 `curl -s localhost:11434/api/version`으로 서버 확인.

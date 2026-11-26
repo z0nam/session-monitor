@@ -73,7 +73,25 @@ reap() {
   done < <(Q "SELECT session_id, pid FROM sessions WHERE state != 'ENDED' AND pid IS NOT NULL;")
 }
 
+pause_py() { SMON_DB="$DB" python3 "$SMON_HOME/worker/pause.py" "$@"; }
+
+# 허브면 pause 상태를 원격 워커에 바로 전파 — smon pull 이 export --pause-until 로 실어 보낸다.
+# 백그라운드(ssh 대기로 명령이 늘어지지 않게). 실패해도 2분 주기 pull 이 다시 맞춘다.
+push_pause() {
+  [ -n "$(Q "SELECT value FROM config WHERE key='remote_hosts';")" ] || return 0
+  ( "$SMON_HOME/bin/smon" pull >/dev/null 2>&1 & )
+  echo "원격 워커에 전파 중 (smon pull)"
+}
+
 board() {  # $1 = extra WHERE   (state 뒤 '?' = pid 미확인, PH: B=지침대기 G=완료)
+  # smon pause 중이면 맨 위에 한 줄 (python 안 띄우고 sqlite 로 판정)
+  local pu
+  pu=$(Q "SELECT CASE WHEN CAST(value AS INTEGER) > strftime('%s','now')
+            THEN strftime(CASE WHEN date(CAST(value AS INTEGER),'unixepoch','localtime') = date('now','localtime')
+                               THEN '%H:%M' ELSE '%m/%d %H:%M' END,
+                          CAST(value AS INTEGER),'unixepoch','localtime') END
+          FROM config WHERE key='pause_until';")
+  [ -n "$pu" ] && echo "⏸  요약 일시정지 중(~${pu}까지) — 재개: smon resume"
   {
     echo 'STATE|AGENT|MACHINE|PROJECT|BRANCH|LAST|SESSION|PH|SUMMARY'
     Q "SELECT st, ag, mc, pj, br, el, sid,
@@ -191,6 +209,11 @@ case "${1:-}" in
   export)
     # 이 머신의 활성 세션 스냅샷을 JSON으로 stdout에 (허브의 smon pull이 ssh로 호출).
     # 죽은 세션이 전파되지 않도록 먼저 reap.
+    # --pause-until <epoch>: 허브(studio)의 요약 일시정지 상태를 이 머신에 맞춘다
+    # (원격 워커도 studio Ollama 를 쓰므로 허브가 기준). stdout 은 JSON 만 — 메시지는 버린다.
+    if [ "${2:-}" = --pause-until ] && [ -n "${3:-}" ]; then
+      pause_py sync "$3" >/dev/null 2>&1 || true
+    fi
     reap
     OUT=$(sqlite3 -json -cmd '.timeout 500' "$DB" \
       "SELECT session_id, agent, project_path, git_branch, state,
@@ -219,13 +242,15 @@ case "${1:-}" in
     # 원격 맥의 smon 경로 — 원격 머신은 범위 밖이라 기존 경로 유지(원격 셸이 $HOME 확장), env 로만 override.
     _remote_def='"$HOME/dev/session-monitor/bin/smon"'
     REMOTE_BIN="${SMON_REMOTE_BIN:-$_remote_def}"
+    # 허브의 요약 일시정지 상태를 export 인자로 실어 보낸다 (옛 원격 smon 은 인자를 무시 — 호환)
+    PAUSE_UNTIL=$(pause_py until 2>/dev/null || echo 0)
     WIN_CMD_CMD='python "%USERPROFILE%\dev\session-monitor\winspoke\record_event.py" export'
     WIN_CMD_PS1='python "$env:USERPROFILE\dev\session-monitor\winspoke\record_event.py" export'
     for h in $HOSTS $HOSTS_WIN; do
       TMP=$(mktemp)
       case " $HOSTS_WIN " in
         *" $h "*) FETCH_OK=$(fetch "$h" "$TMP" "$WIN_CMD_CMD" "$WIN_CMD_PS1" && echo y) ;;
-        *)        FETCH_OK=$(fetch "$h" "$TMP" "$REMOTE_BIN export" && echo y) ;;
+        *)        FETCH_OK=$(fetch "$h" "$TMP" "$REMOTE_BIN export --pause-until ${PAUSE_UNTIL:-0}" && echo y) ;;
       esac
       if [ "$FETCH_OK" = y ]; then
         Q "BEGIN;
@@ -395,6 +420,17 @@ case "${1:-}" in
       END{ printf "\n(활성 세션 %d개 · 완료/빈요약 제외)\n", n }' \
       | { echo "# smon report — $NOWD · $MACHINE"; cat; }
     ;;
+  pause)
+    # 요약 일시정지: smon pause [3h|90m|1h30m] (기본 2h). 모델을 Ollama 메모리에서 즉시 내리고,
+    # 만료 시각이 지나면 자동 재개. 알림·reap·탭 색·리포트·로그 순환은 계속 돈다.
+    # 허브(config remote_hosts 있음)면 원격 워커에도 즉시 전파 (놓쳐도 smon pull 이 2분 안에 맞춤).
+    pause_py pause "${2:-2h}"
+    push_pause
+    ;;
+  resume)
+    pause_py resume
+    push_pause
+    ;;
   model)
     # 요약 모델 조회/교체 (탐색용 — 이 모델 저 모델 바꿔가며 비교)
     if [ -n "${2:-}" ]; then
@@ -422,6 +458,6 @@ case "${1:-}" in
     SMON_DB="$DB" exec python3 "$SMON_HOME/worker/token_usage.py" "$@"
     ;;
   *)
-    echo "usage: smon [all | find <검색어> | grep <검색어> | tokens [--csv PATH] | report | tail <sid> | done [sid] | dir [sid] | ack <sid> | prune | backfill | model [이름] | work | export | pull]" >&2; exit 1
+    echo "usage: smon [all | find <검색어> | grep <검색어> | tokens [--csv PATH] | report | tail <sid> | done [sid] | dir [sid] | ack <sid> | prune | backfill | pause [3h|90m] | resume | model [이름] | work | export | pull]" >&2; exit 1
     ;;
 esac
